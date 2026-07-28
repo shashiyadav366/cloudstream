@@ -1362,18 +1362,25 @@ class CS3IPlayer : IPlayer {
             }
         }
         return exoPlayerBuilder.build().apply {
-            setPlayWhenReady(playWhenReady)
-            seekTo(currentWindow, playbackPosition)
-            // Merge video, subtitles and external audio tracks
-            val allSources = listOf(videoMediaSource) + subSources + audioSources
-            setMediaSource(
-                MergingMediaSource(*allSources.toTypedArray()),
-                playbackPosition
-            )
-            setHandleAudioBecomingNoisy(true)
-            setPlaybackSpeed(playBackSpeed)
-            this.addAnalyticsListener(tracksAnalyticsListener)
-        }
+    setPlayWhenReady(playWhenReady)
+
+    if (mediaItemSlices.size > 1 || subSources.isNotEmpty() || audioSources.isNotEmpty()) {
+        seekTo(currentWindow, playbackPosition)
+
+        val allSources = listOf(videoMediaSource) + subSources + audioSources
+
+        setMediaSource(
+            MergingMediaSource(*allSources.toTypedArray()),
+            playbackPosition
+        )
+    } else {
+        setMediaSource(videoMediaSource)
+    }
+
+    setHandleAudioBecomingNoisy(true)
+    setPlaybackSpeed(playBackSpeed)
+    addAnalyticsListener(tracksAnalyticsListener)
+}
     }
 
     private fun loadExo(
