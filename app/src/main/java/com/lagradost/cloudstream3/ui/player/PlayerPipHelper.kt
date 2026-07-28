@@ -202,4 +202,25 @@ object PlayerPipHelper {
         }
     }
 
+    /**
+ * Manually enter Picture-in-Picture mode.
+ * Used by the Minimize button in the player.
+ */
+fun enterPip(activity: Activity) {
+    if (!activity.isPIPPossible()) return
+
+    try {
+        CommonActivity.isPipDesired = true
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.enterPictureInPictureMode()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            @Suppress("DEPRECATION")
+            activity.enterPictureInPictureMode()
+        }
+    } catch (t: Throwable) {
+        logError(t)
+    }
+}
+
 }
