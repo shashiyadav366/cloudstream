@@ -310,8 +310,8 @@ object CommonActivity {
 /**
  * Public API to enter Picture-in-Picture mode from anywhere.
  */
-fun Activity.enterPlayerPip() {
-    enterPIPMode()
+fun enterPlayerPip(act: Activity) {
+    act.enterPIPMode()
 }
 
 fun onUserLeaveHint(act: Activity) {
