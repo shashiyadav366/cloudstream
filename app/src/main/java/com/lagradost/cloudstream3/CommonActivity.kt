@@ -285,33 +285,40 @@ object CommonActivity {
 
     /** Enters pip mode if it is both possible and desired to do so*/
     private fun Activity.enterPIPMode() {
-        if (!isPipDesired || !this.isPIPPossible()) return
+    if (!isPipDesired || !this.isPIPPossible()) return
 
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                try {
-                    enterPictureInPictureMode(PictureInPictureParams.Builder().build())
-                } catch (_: Exception) {
-                    // Use fallback just in case
-                    @Suppress("DEPRECATION")
-                    enterPictureInPictureMode()
-                }
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    @Suppress("DEPRECATION")
-                    enterPictureInPictureMode()
-                }
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                enterPictureInPictureMode(PictureInPictureParams.Builder().build())
+            } catch (_: Exception) {
+                // Use fallback just in case
+                @Suppress("DEPRECATION")
+                enterPictureInPictureMode()
             }
-        } catch (e: Exception) {
-            logError(e)
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                @Suppress("DEPRECATION")
+                enterPictureInPictureMode()
+            }
         }
+    } catch (e: Exception) {
+        logError(e)
     }
+}
 
-    fun onUserLeaveHint(act: Activity) {
-        // On Android 12 and later we use setAutoEnterEnabled() instead.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
-        act.enterPIPMode()
-    }
+/**
+ * Public API to enter Picture-in-Picture mode from anywhere.
+ */
+fun Activity.enterPlayerPip() {
+    enterPIPMode()
+}
+
+fun onUserLeaveHint(act: Activity) {
+    // On Android 12 and later we use setAutoEnterEnabled() instead.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+    act.enterPIPMode()
+}
 
     fun updateTheme(act: Activity) {
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(act)
