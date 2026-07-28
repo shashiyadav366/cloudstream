@@ -41,7 +41,7 @@ import com.google.android.material.button.MaterialButton
 import com.lagradost.cloudstream3.CommonActivity.keyEventListener
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.enterPlayerPip
+import com.lagradost.cloudstream3.ui.player.PlayerPipHelper.enterPip
 import com.lagradost.cloudstream3.databinding.FragmentPlayerBinding
 import com.lagradost.cloudstream3.databinding.PlayerCustomLayoutBinding
 import com.lagradost.cloudstream3.databinding.SpeedDialogBinding
@@ -1251,10 +1251,10 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 toggleLock()
             }
 
-            playerMinimize.setOnClickListener {
+           playerMinimize.setOnClickListener {
     autoHide()
-    requireActivity().enterPlayerPip()
-            }
+    enterPip(requireActivity())
+           } 
 
             playerSubtitleOffsetBtt.setOnClickListener {
                 showSubtitleOffsetDialog()
