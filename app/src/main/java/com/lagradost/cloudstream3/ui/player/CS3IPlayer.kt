@@ -26,6 +26,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -1361,7 +1362,7 @@ class CS3IPlayer : IPlayer {
                 source
             }
         }
-        return exoPlayerBuilder.build().apply {
+return exoPlayerBuilder.build().apply {
     setPlayWhenReady(playWhenReady)
 
     if (mediaItemSlices.size > 1 || subSources.isNotEmpty() || audioSources.isNotEmpty()) {
@@ -1379,7 +1380,31 @@ class CS3IPlayer : IPlayer {
 
     setHandleAudioBecomingNoisy(true)
     setPlaybackSpeed(playBackSpeed)
+
     addAnalyticsListener(tracksAnalyticsListener)
+
+    addListener(object : Player.Listener {
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState != Player.STATE_READY) return
+
+            val timeline = currentTimeline
+            if (timeline.isEmpty) return
+
+            val window = Timeline.Window()
+            timeline.getWindow(currentMediaItemIndex, window)
+
+            Log.d("LIVE_TEST", "isLive=${window.isLive}")
+            Log.d("LIVE_TEST", "isDynamic=${window.isDynamic}")
+            Log.d("LIVE_TEST", "isSeekable=${window.isSeekable}")
+
+            if (window.isLive) {
+                setPlaybackSpeed(1.0f)
+            } else {
+                setPlaybackSpeed(playBackSpeed)
+            }
+        }
+    })
 }
     }
 
