@@ -1365,18 +1365,21 @@ class CS3IPlayer : IPlayer {
 return exoPlayerBuilder.build().apply {
     setPlayWhenReady(playWhenReady)
 
-    if (mediaItemSlices.size > 1 || subSources.isNotEmpty() || audioSources.isNotEmpty()) {
-        seekTo(currentWindow, playbackPosition)
+    val mediaSource =
+        if (subSources.isNotEmpty() || audioSources.isNotEmpty()) {
+            MergingMediaSource(
+                videoMediaSource,
+                *subSources.toTypedArray(),
+                *audioSources.toTypedArray()
+            )
+        } else {
+            videoMediaSource
+        }
 
-        val allSources = listOf(videoMediaSource) + subSources + audioSources
-
-        setMediaSource(
-            MergingMediaSource(*allSources.toTypedArray()),
-            playbackPosition
-        )
-    } else {
-        setMediaSource(videoMediaSource)
-    }
+    // This preserves watch history for VOD.
+    // For live streams, playbackPosition is already TIME_UNSET,
+    // so ExoPlayer automatically starts at the live edge.
+    setMediaSource(mediaSource, playbackPosition)
 
     setHandleAudioBecomingNoisy(true)
     setPlaybackSpeed(playBackSpeed)
