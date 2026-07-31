@@ -91,23 +91,7 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
         }
 
         getPref(R.string.github_token_key)?.setOnPreferenceClickListener {
-            val current =
-                settingsManager.getString(getString(R.string.github_token_key), null) ?: ""
-            activity?.showNginxTextInputDialog(
-                getString(R.string.github_token_title),
-                current,
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
-                {}
-            ) { value ->
-                val trimmed = value.trim()
-                if (trimmed.isBlank()) {
-                    showToast(R.string.github_token_empty, Toast.LENGTH_SHORT)
-                } else {
-                    settingsManager.edit {
-                        putString(getString(R.string.github_token_key), trimmed)
-                    }
-                }
-            }
+            promptForGitHubToken {}
             return@setOnPreferenceClickListener true
         }
 
@@ -367,6 +351,33 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
         }
     }
 
+    /** Lets the user enter or edit the GitHub token. */
+    private fun promptForGitHubToken(onDone: () -> Unit) {
+        val current =
+            settingsManager.getString(getString(R.string.github_token_key), null) ?: ""
+        activity?.showNginxTextInputDialog(
+            getString(R.string.github_token_title),
+            current,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            {}
+        ) { value ->
+            val trimmed = value.trim()
+            if (trimmed.isBlank()) {
+                showToast(R.string.github_token_empty, Toast.LENGTH_SHORT)
+            } else {
+                settingsManager.edit {
+                    putString(getString(R.string.github_token_key), trimmed)
+                }
+                onDone()
+            }
+        }
+    }
+
+    private fun isGitHubUrl(path: String): Boolean {
+        return path.startsWith("https://github.com") ||
+            path.startsWith("https://raw.githubusercontent.com")
+    }
+
     /** Lets the user enter or edit the backup path/URL. */
     private fun promptForBackupPath(onDone: () -> Unit) {
         val current = settingsManager.getString(getString(R.string.backup_url_key), null) ?: ""
@@ -404,6 +415,10 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
                 val path = settingsManager.getString(getString(R.string.backup_url_key), null)
                 if (path.isNullOrBlank()) {
                     promptForBackupPath { runBackup(BackupUtils.BACKUP_DESTINATION_PATH_URL) }
+                } else if (isGitHubUrl(path) &&
+                    BackupUtils.getBackupToken(requireContext()).isNullOrBlank()
+                ) {
+                    promptForGitHubToken { runBackup(BackupUtils.BACKUP_DESTINATION_PATH_URL) }
                 } else {
                     BackupUtils.backupToPath(activity, path)
                 }
