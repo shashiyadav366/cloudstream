@@ -190,6 +190,8 @@
     <string name="github_token_title">GitHub token</string>
     <string name="github_token_summary">Token used to upload backups to GitHub</string>
     <string name="github_token_empty">Token cannot be empty</string>
+    <string name="auto_restore_title">Auto-restore</string>
+    <string name="auto_restore_summary">After each automatic backup, also restore the backup from the configured source</string>
     <string name="search">Search</string>
     <string name="library">Library</string>
     <string name="category_account">Accounts and Security</string>

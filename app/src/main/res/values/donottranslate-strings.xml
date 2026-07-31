@@ -92,6 +92,7 @@
     <string name="backup_destination_key">backup_destination</string>
     <string name="backup_url_key">backup_url</string>
     <string name="github_token_key">github_token</string>
+    <string name="auto_restore_key">auto_restore</string>
     <string name="confirm_exit_key">confirm_exit_key</string>
     <string name="software_decoding_key">software_decoding_key2</string>
     <string name="manual_update_plugins_key">manual_update_plugins</string>

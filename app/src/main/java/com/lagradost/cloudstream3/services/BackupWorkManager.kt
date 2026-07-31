@@ -91,6 +91,7 @@ class BackupWorkManager(val context: Context, workerParams: WorkerParameters) :
         setForeground(foregroundInfo)
 
         BackupUtils.backup(context)
+        BackupUtils.autoRestoreAfterBackup(context)
 
         return Result.success()
     }

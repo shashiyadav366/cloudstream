@@ -491,21 +491,7 @@ object BackupUtils {
         val activity = this
         ioSafe {
             try {
-                val text = when {
-                    path.startsWith("http://") || path.startsWith("https://") -> {
-                        val response =
-                            app.baseClient.newCall(Request.Builder().url(path).build()).execute()
-                        response.use {
-                            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
-                            it.body?.string() ?: throw IOException("Empty response")
-                        }
-                    }
-                    else -> {
-                        val file = SafeFile.fromFilePath(activity, path)
-                            ?: throw IOException("Bad path: $path")
-                        file.openInputStreamOrThrow().bufferedReader().readText()
-                    }
-                }
+                val text = fetchPathText(activity, path)
                 activity.restoreFromText(text)
             } catch (e: Exception) {
                 logError(e)
@@ -515,6 +501,44 @@ object BackupUtils {
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Restores the backup from the configured Path/URL source after an
+     * automatic backup, keeping multiple devices in sync. Only runs when the
+     * auto-restore setting is enabled and the destination is Path/URL.
+     */
+    fun autoRestoreAfterBackup(context: Context?) {
+        if (context == null) return
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        if (!prefs.getBoolean(context.getString(R.string.auto_restore_key), false)) return
+        if (getBackupDestination(context) != BACKUP_DESTINATION_PATH_URL) return
+        val path = getBackupUrl(context) ?: return
+        ioSafe {
+            try {
+                val text = fetchPathText(context, path)
+                val backupFile = parseJson<BackupFile>(text)
+                restore(context, backupFile, restoreSettings = true, restoreDataStore = true)
+            } catch (e: Exception) {
+                logError(e)
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun fetchPathText(context: Context, path: String): String = when {
+        path.startsWith("http://") || path.startsWith("https://") -> {
+            val response = app.baseClient.newCall(Request.Builder().url(path).build()).execute()
+            response.use {
+                if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+                it.body?.string() ?: throw IOException("Empty response")
+            }
+        }
+        else -> {
+            val file = SafeFile.fromFilePath(context, path)
+                ?: throw IOException("Bad path: $path")
+            file.openInputStreamOrThrow().bufferedReader().readText()
         }
     }
 
