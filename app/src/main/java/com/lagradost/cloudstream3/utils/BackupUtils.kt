@@ -13,6 +13,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY_LOCAL
@@ -38,7 +39,11 @@ import com.lagradost.safefile.MediaFileContentType
 import com.lagradost.safefile.SafeFile
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.internal.closeQuietly
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
 import java.io.PrintWriter
@@ -48,6 +53,19 @@ import java.util.Date
 import java.util.Locale
 
 object BackupUtils {
+
+    const val BACKUP_DESTINATION_LOCAL = "local"
+    const val BACKUP_DESTINATION_PATH_URL = "path_url"
+
+    fun getBackupDestination(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.backup_destination_key), null)
+    }
+
+    fun getBackupUrl(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.backup_url_key), null)
+    }
 
     /**
      * No sensitive or breaking data in the backup
@@ -199,6 +217,23 @@ object BackupUtils {
 
     fun backup(context: Context?) = ioSafe {
         if (context == null) return@ioSafe
+        if (getBackupDestination(context) == BACKUP_DESTINATION_PATH_URL) {
+            val path = getBackupUrl(context)
+            if (!path.isNullOrBlank()) {
+                backupToPathInternal(context, path)
+                return@ioSafe
+            }
+        }
+        backupLocalInternal(context)
+    }
+
+    /** Writes the backup to the given path or URL instead of the local backup folder. */
+    fun backupToPath(context: Context?, path: String) = ioSafe {
+        if (context == null) return@ioSafe
+        backupToPathInternal(context, path)
+    }
+
+    private fun backupLocalInternal(context: Context) {
         var fileStream: OutputStream? = null
         var printStream: PrintWriter? = null
 
@@ -206,7 +241,7 @@ object BackupUtils {
             if (!context.checkWrite()) {
                 showToast(R.string.backup_failed, Toast.LENGTH_LONG)
                 context.getActivity()?.requestRW()
-                return@ioSafe
+                return
             }
 
             val date = SimpleDateFormat("yyyy_MM_dd_HH_mm", Locale.getDefault()).format(Date(currentTimeMillis()))
@@ -234,6 +269,75 @@ object BackupUtils {
         }
     }
 
+    private fun backupToPathInternal(context: Context, path: String) {
+        var fileStream: OutputStream? = null
+        var printStream: PrintWriter? = null
+
+        try {
+            val backupFile = getBackup(context)
+            val json = backupFile.toJson()
+            if (path.startsWith("http://") || path.startsWith("https://")) {
+                uploadToUrl(path, json)
+                showToast(txt(R.string.backup_uploaded_format, path), Toast.LENGTH_LONG)
+                return
+            }
+
+            fileStream = backupPathToFile(context, path).openOutputStreamOrThrow(false)
+            printStream = PrintWriter(fileStream)
+            printStream.print(json)
+            showToast(txt(R.string.backup_saved_to_format, path), Toast.LENGTH_LONG)
+        } catch (e: Exception) {
+            logError(e)
+            try {
+                showToast(
+                    txt(R.string.backup_failed_error_format, e.toString()),
+                    Toast.LENGTH_LONG,
+                )
+            } catch (e: Exception) {
+                logError(e)
+            }
+        } finally {
+            printStream?.closeQuietly()
+            fileStream?.closeQuietly()
+        }
+    }
+
+    /**
+     * Tries to upload the backup with PUT, falling back to POST for endpoints
+     * that do not accept PUT requests.
+     */
+    @Throws(IOException::class)
+    private fun uploadToUrl(url: String, json: String) {
+        val body = json.toRequestBody("text/plain; charset=utf-8".toMediaType())
+        val putResponse = app.baseClient.newCall(Request.Builder().url(url).put(body).build()).execute()
+        if (!putResponse.isSuccessful && putResponse.code in listOf(404, 405)) {
+            putResponse.close()
+            val postResponse = app.baseClient.newCall(Request.Builder().url(url).post(body).build()).execute()
+            postResponse.use {
+                if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+            }
+            return
+        }
+        putResponse.use {
+            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+        }
+    }
+
+    /**
+     * Resolves the given path to a file. If the path points to a directory
+     * (ends with a separator) a timestamped backup file is created in it.
+     */
+    @Throws(IOException::class)
+    private fun backupPathToFile(context: Context, path: String): SafeFile {
+        if (path.endsWith(File.separator) || path.endsWith("/")) {
+            val dir = SafeFile.fromFilePath(context, path)
+                ?: throw IOException("Bad path: $path")
+            val date = SimpleDateFormat("yyyy_MM_dd_HH_mm", Locale.getDefault()).format(Date(currentTimeMillis()))
+            return dir.createFileOrThrow("CS3_Backup_${date}.txt")
+        }
+        return SafeFile.fromFilePath(context, path) ?: throw IOException("Bad path: $path")
+    }
+
     @Throws(IOException::class)
     private fun setupBackupStream(context: Context, name: String, ext: String = "txt"): DownloadObjects.StreamData {
         return setupStream(
@@ -258,15 +362,7 @@ object BackupUtils {
                                 ?: return@ioSafe
 
                             val text = input.bufferedReader().readText()
-                            val restoredValue = parseJson<BackupFile>(text)
-
-                            restore(
-                                activity,
-                                restoredValue,
-                                restoreSettings = true,
-                                restoreDataStore = true,
-                            )
-                            activity.runOnUiThread { activity.recreate() }
+                            activity.restoreFromText(text)
                         } catch (e: Exception) {
                             logError(e)
                             main { // smth can fail in .format
@@ -280,6 +376,50 @@ object BackupUtils {
         } catch (e: Exception) {
             logError(e)
         }
+    }
+
+    /** Restores a backup from the given local path or http(s) URL. */
+    fun FragmentActivity.restoreFromPath(path: String) {
+        val activity = this
+        ioSafe {
+            try {
+                val text = when {
+                    path.startsWith("http://") || path.startsWith("https://") -> {
+                        val response =
+                            app.baseClient.newCall(Request.Builder().url(path).build()).execute()
+                        response.use {
+                            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+                            it.body?.string() ?: throw IOException("Empty response")
+                        }
+                    }
+                    else -> {
+                        val file = SafeFile.fromFilePath(activity, path)
+                            ?: throw IOException("Bad path: $path")
+                        file.openInputStreamOrThrow().bufferedReader().readText()
+                    }
+                }
+                activity.restoreFromText(text)
+            } catch (e: Exception) {
+                logError(e)
+                main { // smth can fail in .format
+                    showToast(
+                        getString(R.string.restore_failed_format).format(e.toString())
+                    )
+                }
+            }
+        }
+    }
+
+    private fun FragmentActivity.restoreFromText(text: String) {
+        val restoredValue = parseJson<BackupFile>(text)
+
+        restore(
+            this,
+            restoredValue,
+            restoreSettings = true,
+            restoreDataStore = true,
+        )
+        runOnUiThread { recreate() }
     }
 
     fun FragmentActivity.restorePrompt() {

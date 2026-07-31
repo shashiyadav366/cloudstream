@@ -179,6 +179,14 @@
     <string name="backup_success">Data stored</string>
     <string name="backup_failed">Storage permissions missing. Please try again.</string>
     <string name="backup_failed_error_format">Error backing up %s</string>
+    <string name="backup_destination_title">Backup destination</string>
+    <string name="backup_destination_choose_title">Choose backup destination</string>
+    <string name="backup_destination_local">Local</string>
+    <string name="backup_destination_path_url">Path/URL</string>
+    <string name="backup_path_or_url_title">Backup path or URL</string>
+    <string name="backup_path_empty">Path cannot be empty</string>
+    <string name="backup_uploaded_format" formatted="true">Backup uploaded to %1$s</string>
+    <string name="backup_saved_to_format" formatted="true">Backup saved to %1$s</string>
     <string name="search">Search</string>
     <string name="library">Library</string>
     <string name="category_account">Accounts and Security</string>

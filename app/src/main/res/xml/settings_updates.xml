@@ -32,6 +32,11 @@
         android:title="@string/pref_category_backup">
         <Preference
             android:icon="@drawable/baseline_save_as_24"
+            android:key="@string/backup_destination_key"
+            android:title="@string/backup_destination_title" />
+
+        <Preference
+            android:icon="@drawable/baseline_save_as_24"
             android:key="@string/backup_key"
             android:title="@string/backup_settings" />
 

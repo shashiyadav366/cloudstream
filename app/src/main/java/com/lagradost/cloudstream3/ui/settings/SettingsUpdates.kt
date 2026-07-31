@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.ui.settings
 
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -30,12 +31,14 @@ import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setTool
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setUpToolbar
 import com.lagradost.cloudstream3.ui.settings.utils.getChooseFolderLauncher
 import com.lagradost.cloudstream3.utils.BackupUtils
+import com.lagradost.cloudstream3.utils.BackupUtils.restoreFromPath
 import com.lagradost.cloudstream3.utils.BackupUtils.restorePrompt
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.InAppUpdater.installPreReleaseIfNeeded
 import com.lagradost.cloudstream3.utils.InAppUpdater.runAutoUpdate
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showDialog
+import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showNginxTextInputDialog
 import com.lagradost.cloudstream3.utils.UIHelper.clipboardHelper
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
@@ -50,6 +53,8 @@ import java.util.Date
 import java.util.Locale
 
 class SettingsUpdates : BasePreferenceFragmentCompat() {
+    private lateinit var settingsManager: android.content.SharedPreferences
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setUpToolbar(R.string.category_updates)
@@ -72,10 +77,16 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         hideKeyboard()
         setPreferencesFromResource(R.xml.settings_updates, rootKey)
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        settingsManager = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        updateBackupDestinationSummary()
 
         getPref(R.string.backup_key)?.setOnPreferenceClickListener {
-            BackupUtils.backup(activity)
+            runBackupOrChoose()
+            return@setOnPreferenceClickListener true
+        }
+
+        getPref(R.string.backup_destination_key)?.setOnPreferenceClickListener {
+            chooseBackupDestination {}
             return@setOnPreferenceClickListener true
         }
 
@@ -108,7 +119,7 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
         }
 
         getPref(R.string.restore_key)?.setOnPreferenceClickListener {
-            activity?.restorePrompt()
+            runRestoreOrChoose()
             return@setOnPreferenceClickListener true
         }
         getPref(R.string.backup_path_key)?.hideOn(EMULATOR)?.setOnPreferenceClickListener {
@@ -281,6 +292,125 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
                 PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_manuallyReloadAndUpdatePlugins(activity ?: return@ioSafe)
             }
             return@setOnPreferenceClickListener true // Return true for the listener
+        }
+    }
+
+    private fun currentBackupDestination(): String? {
+        return settingsManager.getString(getString(R.string.backup_destination_key), null)
+    }
+
+    private fun updateBackupDestinationSummary() {
+        val pref = getPref(R.string.backup_destination_key) ?: return
+        pref.summary = when (currentBackupDestination()) {
+            BackupUtils.BACKUP_DESTINATION_PATH_URL -> {
+                settingsManager.getString(getString(R.string.backup_url_key), null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.backup_destination_path_url)
+            }
+            else -> getString(R.string.backup_destination_local)
+        }
+    }
+
+    /** Lets the user pick Local or Path/URL and stores the choice in settings. */
+    private fun chooseBackupDestination(onChosen: (String) -> Unit) {
+        val options = listOf(
+            getString(R.string.backup_destination_local),
+            getString(R.string.backup_destination_path_url),
+        )
+        val selectedIndex = when (currentBackupDestination()) {
+            BackupUtils.BACKUP_DESTINATION_LOCAL -> 0
+            BackupUtils.BACKUP_DESTINATION_PATH_URL -> 1
+            else -> -1
+        }
+        activity?.showDialog(
+            options,
+            selectedIndex,
+            getString(R.string.backup_destination_choose_title),
+            false,
+            {}
+        ) { index ->
+            val destination = if (index == 0) {
+                BackupUtils.BACKUP_DESTINATION_LOCAL
+            } else {
+                BackupUtils.BACKUP_DESTINATION_PATH_URL
+            }
+            settingsManager.edit {
+                putString(getString(R.string.backup_destination_key), destination)
+            }
+            updateBackupDestinationSummary()
+            if (destination == BackupUtils.BACKUP_DESTINATION_PATH_URL) {
+                promptForBackupPath { onChosen(destination) }
+            } else {
+                onChosen(destination)
+            }
+        }
+    }
+
+    /** Lets the user enter or edit the backup path/URL. */
+    private fun promptForBackupPath(onDone: () -> Unit) {
+        val current = settingsManager.getString(getString(R.string.backup_url_key), null) ?: ""
+        activity?.showNginxTextInputDialog(
+            getString(R.string.backup_path_or_url_title),
+            current,
+            InputType.TYPE_TEXT_VARIATION_URI,
+            {}
+        ) { value ->
+            val trimmed = value.trim()
+            if (trimmed.isBlank()) {
+                showToast(R.string.backup_path_empty, Toast.LENGTH_SHORT)
+            } else {
+                settingsManager.edit {
+                    putString(getString(R.string.backup_url_key), trimmed)
+                }
+                updateBackupDestinationSummary()
+                onDone()
+            }
+        }
+    }
+
+    private fun runBackupOrChoose() {
+        val destination = currentBackupDestination()
+        if (destination == null) {
+            chooseBackupDestination { runBackup(it) }
+        } else {
+            runBackup(destination)
+        }
+    }
+
+    private fun runBackup(destination: String) {
+        when (destination) {
+            BackupUtils.BACKUP_DESTINATION_PATH_URL -> {
+                val path = settingsManager.getString(getString(R.string.backup_url_key), null)
+                if (path.isNullOrBlank()) {
+                    promptForBackupPath { runBackup(BackupUtils.BACKUP_DESTINATION_PATH_URL) }
+                } else {
+                    BackupUtils.backupToPath(activity, path)
+                }
+            }
+            else -> BackupUtils.backup(activity)
+        }
+    }
+
+    private fun runRestoreOrChoose() {
+        val destination = currentBackupDestination()
+        if (destination == null) {
+            chooseBackupDestination { runRestore(it) }
+        } else {
+            runRestore(destination)
+        }
+    }
+
+    private fun runRestore(destination: String) {
+        when (destination) {
+            BackupUtils.BACKUP_DESTINATION_PATH_URL -> {
+                val path = settingsManager.getString(getString(R.string.backup_url_key), null)
+                if (path.isNullOrBlank()) {
+                    promptForBackupPath { runRestore(BackupUtils.BACKUP_DESTINATION_PATH_URL) }
+                } else {
+                    activity?.restoreFromPath(path)
+                }
+            }
+            else -> activity?.restorePrompt()
         }
     }
 
