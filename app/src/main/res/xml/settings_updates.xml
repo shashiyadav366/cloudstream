@@ -37,6 +37,12 @@
 
         <Preference
             android:icon="@drawable/baseline_save_as_24"
+            android:key="@string/github_token_key"
+            android:summary="@string/github_token_summary"
+            android:title="@string/github_token_title" />
+
+        <Preference
+            android:icon="@drawable/baseline_save_as_24"
             android:key="@string/backup_key"
             android:title="@string/backup_settings" />
 

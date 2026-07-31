@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.utils
 
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +68,12 @@ object BackupUtils {
             .getString(context.getString(R.string.backup_url_key), null)
     }
 
+    fun getBackupToken(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.github_token_key), null)
+            ?.takeIf { it.isNotBlank() }
+    }
+
     /**
      * No sensitive or breaking data in the backup
      */
@@ -91,6 +98,9 @@ object BackupUtils {
         "download_path_key_visual",
         "backup_path_key",
         "backup_dir_path_key",
+
+        // GitHub token must not leave the device
+        "github_token",
 
         // When sharing backup we do not want to transfer what is essentially the password
         // Note that this is deprecated, and can be removed after all tokens have expired
@@ -277,8 +287,18 @@ object BackupUtils {
             val backupFile = getBackup(context)
             val json = backupFile.toJson()
             if (path.startsWith("http://") || path.startsWith("https://")) {
-                uploadToUrl(path, json)
-                showToast(txt(R.string.backup_uploaded_format, path), Toast.LENGTH_LONG)
+                val resolvedUrl = when (val gh = parseGitHubPath(path)) {
+                    null -> uploadToUrl(context, path, json)
+                    else -> githubUpload(context, gh, json)
+                }
+                if (resolvedUrl != path) {
+                    // Hosts like 0x0.st / paste.rs assign a new URL on upload,
+                    // remember it so future backups and restores use it automatically.
+                    PreferenceManager.getDefaultSharedPreferences(context).edit {
+                        putString(context.getString(R.string.backup_url_key), resolvedUrl)
+                    }
+                }
+                showToast(txt(R.string.backup_uploaded_format, resolvedUrl), Toast.LENGTH_LONG)
                 return
             }
 
@@ -303,24 +323,111 @@ object BackupUtils {
     }
 
     /**
-     * Tries to upload the backup with PUT, falling back to POST for endpoints
-     * that do not accept PUT requests.
+     * Uploads the backup with PUT, falling back to POST for endpoints that do
+     * not accept PUT requests. Returns the URL the file ended up at, which is
+     * usually the same as [url] but may be a new URL returned by the host.
      */
     @Throws(IOException::class)
-    private fun uploadToUrl(url: String, json: String) {
+    private fun uploadToUrl(context: Context, url: String, json: String): String {
         val body = json.toRequestBody("text/plain; charset=utf-8".toMediaType())
-        val putResponse = app.baseClient.newCall(Request.Builder().url(url).put(body).build()).execute()
+        val putResponse =
+            app.baseClient.newCall(Request.Builder().url(url).put(body).build()).execute()
+        var response = putResponse
         if (!putResponse.isSuccessful && putResponse.code in listOf(404, 405)) {
             putResponse.close()
-            val postResponse = app.baseClient.newCall(Request.Builder().url(url).post(body).build()).execute()
-            postResponse.use {
-                if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
-            }
-            return
+            val postResponse =
+                app.baseClient.newCall(Request.Builder().url(url).post(body).build()).execute()
+            response = postResponse
         }
-        putResponse.use {
+        return response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+            // The response body may contain the final file URL (e.g. paste hosts)
+            it.body?.string()?.let { bodyText ->
+                Regex("https?://[^\\s\"<>]+")
+                    .find(bodyText)
+                    ?.value
+                    ?.trimEnd('.', ',', ')', ']', '"', '\'')
+            } ?: url
         }
+    }
+
+    private data class GitHubPath(
+        val owner: String,
+        val repo: String,
+        val branch: String,
+        val path: String,
+    )
+
+    @Serializable
+    private data class GitHubContentsResponse(
+        val sha: String? = null,
+        val message: String? = null,
+    )
+
+    private val githubRawRegex =
+        Regex("^https?://raw\\.githubusercontent\\.com/([^/]+)/([^/]+)/(?:refs/heads/)?([^/]+)/(.+)$")
+    private val githubBlobRegex =
+        Regex("^https?://github\\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$")
+
+    /** Extracts owner, repo, branch and file path from a GitHub file URL. */
+    private fun parseGitHubPath(url: String): GitHubPath? {
+        val match = githubRawRegex.find(url) ?: githubBlobRegex.find(url) ?: return null
+        return GitHubPath(match.groupValues[1], match.groupValues[2], match.groupValues[3], match.groupValues[4])
+    }
+
+    /**
+     * Uploads the backup to a GitHub repository via the Contents API using the
+     * token stored in settings. Returns the raw file URL used for restoring.
+     */
+    @Throws(IOException::class)
+    private fun githubUpload(context: Context, gh: GitHubPath, json: String): String {
+        val token = getBackupToken(context)
+            ?: throw IOException("GitHub token missing")
+        val apiUrl = "https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${gh.path}"
+
+        // Existing files need their sha to be updated
+        val existingSha = runCatching {
+            val response = app.baseClient.newCall(
+                Request.Builder()
+                    .url("$apiUrl?ref=${gh.branch}")
+                    .header("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+            ).execute()
+            response.use {
+                if (it.isSuccessful) {
+                    parseJson<GitHubContentsResponse>(it.body?.string() ?: "").sha
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+
+        val contentB64 = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val bodyJson = buildString {
+            append("{\"message\":\"backup\",\"content\":\"")
+            append(contentB64)
+            append("\",\"branch\":\"")
+            append(gh.branch.replace("\"", "\\\""))
+            if (existingSha != null) {
+                append("\",\"sha\":\"")
+                append(existingSha)
+            }
+            append("\"}")
+        }
+        val response = app.baseClient.newCall(
+            Request.Builder()
+                .url(apiUrl)
+                .header("Authorization", "Bearer $token")
+                .put(bodyJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+        ).execute()
+        response.use {
+            if (!it.isSuccessful) {
+                throw IOException("HTTP ${it.code} ${it.body?.string()?.take(200)}")
+            }
+        }
+        return "https://raw.githubusercontent.com/${gh.owner}/${gh.repo}/refs/heads/${gh.branch}/${gh.path}"
     }
 
     /**

@@ -90,6 +90,27 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
             return@setOnPreferenceClickListener true
         }
 
+        getPref(R.string.github_token_key)?.setOnPreferenceClickListener {
+            val current =
+                settingsManager.getString(getString(R.string.github_token_key), null) ?: ""
+            activity?.showNginxTextInputDialog(
+                getString(R.string.github_token_title),
+                current,
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                {}
+            ) { value ->
+                val trimmed = value.trim()
+                if (trimmed.isBlank()) {
+                    showToast(R.string.github_token_empty, Toast.LENGTH_SHORT)
+                } else {
+                    settingsManager.edit {
+                        putString(getString(R.string.github_token_key), trimmed)
+                    }
+                }
+            }
+            return@setOnPreferenceClickListener true
+        }
+
         getPref(R.string.automatic_backup_key)?.setOnPreferenceClickListener {
             val prefNames = resources.getStringArray(R.array.periodic_work_names)
             val prefValues = resources.getIntArray(R.array.periodic_work_values)

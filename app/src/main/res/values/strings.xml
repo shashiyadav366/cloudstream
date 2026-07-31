@@ -187,6 +187,9 @@
     <string name="backup_path_empty">Path cannot be empty</string>
     <string name="backup_uploaded_format" formatted="true">Backup uploaded to %1$s</string>
     <string name="backup_saved_to_format" formatted="true">Backup saved to %1$s</string>
+    <string name="github_token_title">GitHub token</string>
+    <string name="github_token_summary">Token used to upload backups to GitHub</string>
+    <string name="github_token_empty">Token cannot be empty</string>
     <string name="search">Search</string>
     <string name="library">Library</string>
     <string name="category_account">Accounts and Security</string>
