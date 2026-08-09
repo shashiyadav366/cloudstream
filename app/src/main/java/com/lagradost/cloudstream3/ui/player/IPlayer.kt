@@ -216,6 +216,9 @@ interface IPlayer {
     /** Current player position in milliseconds */
     fun getPosition(): Long?
 
+    /** Current player volume, 0f means muted, 1f is max */
+    fun getVolume(): Float
+
     fun seekTime(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
     fun seekTo(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
 
