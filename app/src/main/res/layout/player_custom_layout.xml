@@ -800,7 +800,7 @@
                         android:textSize="14sp"
                         android:textStyle="normal"
                         app:layout_constraintBaseline_toBaselineOf="@id/exo_position"
-                        app:layout_constraintEnd_toStartOf="@id/player_mute_btt"
+                        app:layout_constraintEnd_toEndOf="parent"
                         tools:text="23:20" />
 
                     <TextView
@@ -818,7 +818,7 @@
                         android:textStyle="normal"
                         android:visibility="gone"
                         app:layout_constraintBaseline_toBaselineOf="@id/exo_position"
-                        app:layout_constraintEnd_toStartOf="@id/player_mute_btt"
+                        app:layout_constraintEnd_toEndOf="parent"
                         android:text="@string/player_is_live" />
 
                     <TextView
@@ -837,21 +837,8 @@
                         android:textStyle="normal"
                         android:visibility="gone"
                         app:layout_constraintBaseline_toBaselineOf="@id/exo_position"
-                        app:layout_constraintEnd_toStartOf="@id/player_mute_btt"
-                        tools:text="-23:20" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/player_mute_btt"
-                        style="@style/VideoButton"
-                        android:layout_height="40dp"
-                        android:layout_marginEnd="20dp"
-                        android:nextFocusLeft="@id/player_skip_episode"
-                        android:nextFocusRight="@id/player_mute_btt"
-                        android:text="@string/mute"
-                        app:icon="@drawable/ic_baseline_volume_up_24"
-                        app:layout_constraintBottom_toBottomOf="parent"
                         app:layout_constraintEnd_toEndOf="parent"
-                        app:layout_constraintTop_toTopOf="parent" />
+                        tools:text="-23:20" />
 
                 </androidx.constraintlayout.widget.ConstraintLayout>
 
@@ -949,9 +936,18 @@
                                 android:layout_height="40dp"
 
                                 android:nextFocusLeft="@id/player_sources_btt"
-                                android:nextFocusRight="@id/player_skip_op"
+                                android:nextFocusRight="@id/player_mute_btt"
                                 android:text="@string/tracks"
                                 app:icon="@drawable/ic_baseline_equalizer_24" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/player_mute_btt"
+                                style="@style/VideoButton"
+                                android:layout_height="40dp"
+                                android:nextFocusLeft="@id/player_tracks_btt"
+                                android:nextFocusRight="@id/player_skip_op"
+                                android:text="@string/mute"
+                                app:icon="@drawable/ic_baseline_volume_up_24" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_skip_op"
