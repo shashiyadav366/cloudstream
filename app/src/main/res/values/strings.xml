@@ -248,6 +248,10 @@
     <string name="delete_files">Delete Files</string>
     <string name="delete_format" formatted="true">Delete (%1$d | %2$s)</string>
     <string name="cancel">Cancel</string>
+    <string name="blocked_links_title">Blocked External Links</string>
+    <string name="blocked_links_summary">Block up to 5 external URLs/domains from opening in the browser.</string>
+    <string name="blocked_links_dialog_hint">Enter one URL or domain per line. A maximum of 5 entries is saved, and matching includes subdomains.</string>
+    <string name="blocked_links_too_many">Only the first 5 entries are saved.</string>
     <string name="pause">Pause</string>
     <string name="start">Start</string>
     <string name="test_failed">Failed</string>

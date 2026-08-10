@@ -159,6 +159,7 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper.migrateResumeWatching
 import com.lagradost.cloudstream3.utils.Event
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.InAppUpdater.runAutoUpdate
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SnackbarHelper.showSnackbar
 import com.lagradost.cloudstream3.utils.TvChannelUtils
@@ -196,6 +197,26 @@ import kotlin.reflect.full.createInstance
 import kotlin.system.exitProcess
 
 class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCallback {
+    /**
+     * Defense-in-depth: some plugins reach this activity through `CommonActivity.activity`.
+     * Blocked external links are silently swallowed before leaving the process.
+     */
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent.dataString)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent.dataString)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
     companion object {
         var activityResultLauncher: ActivityResultLauncher<Intent>? = null
 

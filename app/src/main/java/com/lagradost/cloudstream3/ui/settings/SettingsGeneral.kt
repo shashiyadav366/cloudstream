@@ -3,7 +3,10 @@ package com.lagradost.cloudstream3.ui.settings
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
+import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.edit
@@ -38,6 +41,7 @@ import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setUpTo
 import com.lagradost.cloudstream3.ui.settings.utils.getChooseFolderLauncher
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.isAppRestricted
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.showBatteryOptimizationDialog
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showMultiDialog
@@ -45,6 +49,7 @@ import com.lagradost.cloudstream3.utils.SubtitleHelper
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
+import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.USER_PROVIDER_API
 import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement
 import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getBasePath
@@ -320,6 +325,33 @@ class SettingsGeneral : BasePreferenceFragmentCompat() {
                 AlertDialog.Builder(it.context, R.style.AlertDialogCustom)
             builder.setTitle(R.string.legal_notice)
             builder.setMessage(R.string.legal_notice_text)
+            builder.show()
+            return@setOnPreferenceClickListener true
+        }
+
+        getPref(R.string.blocked_links_key)?.setOnPreferenceClickListener { pref ->
+            val editText = EditText(pref.context).apply {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                gravity = Gravity.TOP
+                setText(LinkBlocker.getActiveUserBlockedLinks().joinToString("\n"))
+                setSelection(text.length)
+            }
+            editText.setPadding(24.toPx, 16.toPx, 24.toPx, 4.toPx)
+
+            val builder: AlertDialog.Builder =
+                AlertDialog.Builder(pref.context, R.style.AlertDialogCustom)
+            builder.setTitle(R.string.blocked_links_title)
+            builder.setMessage(R.string.blocked_links_dialog_hint)
+            builder.setView(editText)
+            builder.setPositiveButton(R.string.ok) { _, _ ->
+                val value = editText.text?.toString()
+                val list = LinkBlocker.parseUserBlockedLinks(value)
+                if (list.size < (value?.lines()?.filter { it.isNotBlank() }?.size ?: 0)) {
+                    showToast(R.string.blocked_links_too_many, Toast.LENGTH_SHORT)
+                }
+                LinkBlocker.saveUserBlockedLinks(list)
+            }
+            builder.setNegativeButton(R.string.cancel, null)
             builder.show()
             return@setOnPreferenceClickListener true
         }
