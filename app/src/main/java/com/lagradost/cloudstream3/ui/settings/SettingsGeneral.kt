@@ -26,6 +26,8 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.databinding.AddRemoveSitesBinding
 import com.lagradost.cloudstream3.databinding.AddSiteInputBinding
+import com.lagradost.cloudstream3.databinding.ProxySettingsBinding
+import com.lagradost.cloudstream3.insecureApp
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.network.initClient
@@ -353,6 +355,75 @@ class SettingsGeneral : BasePreferenceFragmentCompat() {
             }
             builder.setNegativeButton(R.string.cancel, null)
             builder.show()
+            return@setOnPreferenceClickListener true
+        }
+
+        getPref(R.string.proxy_address_key)?.isEnabled =
+            settingsManager.getBoolean(getString(R.string.proxy_enabled_key), false)
+        getPref(R.string.proxy_address_key)?.summary =
+            settingsManager.getString(getString(R.string.proxy_host_key), null)?.let { host ->
+                settingsManager.getString(getString(R.string.proxy_port_key), null)
+                    ?.let { port -> "$host:$port" }
+            } ?: ""
+
+        getPref(R.string.proxy_enabled_key)?.setOnPreferenceChangeListener { _, newValue ->
+            getPref(R.string.proxy_address_key)?.isEnabled = newValue as? Boolean ?: false
+            (context ?: CloudStreamApp.context)?.let { ctx ->
+                app.initClient(ctx)
+                insecureApp.initClient(ctx, ignoreSSL = true)
+            }
+            return@setOnPreferenceChangeListener true
+        }
+
+        getPref(R.string.proxy_address_key)?.setOnPreferenceClickListener { pref ->
+            val binding: ProxySettingsBinding = ProxySettingsBinding.inflate(layoutInflater, null, false)
+            val proxySettingsManager = PreferenceManager.getDefaultSharedPreferences(pref.context)
+
+            fun currentValue(key: Int): String =
+                proxySettingsManager.getString(getString(key), null) ?: ""
+
+            binding.proxyHostInput.setText(currentValue(R.string.proxy_host_key))
+            binding.proxyPortInput.setText(currentValue(R.string.proxy_port_key))
+            binding.proxyUsernameInput.setText(currentValue(R.string.proxy_username_key))
+            binding.proxyPasswordInput.setText(currentValue(R.string.proxy_password_key))
+            val isSocks = currentValue(R.string.proxy_type_key) == "SOCKS5"
+            binding.proxyTypeHttp.isChecked = !isSocks
+            binding.proxyTypeSocks.isChecked = isSocks
+
+            val builder: AlertDialog.Builder =
+                AlertDialog.Builder(pref.context, R.style.AlertDialogCustom)
+            builder.setView(binding.root)
+            val dialog = builder.create()
+            dialog.show()
+
+            binding.applyBtt.setOnClickListener {
+                val host = binding.proxyHostInput.text?.toString()?.trim().orEmpty()
+                val port = binding.proxyPortInput.text?.toString()?.trim().orEmpty()
+                val portNumber = port.toIntOrNull()
+                if (host.isEmpty() || portNumber == null || portNumber < 1 || portNumber > 65535) {
+                    showToast(R.string.proxy_invalid, Toast.LENGTH_SHORT)
+                    return@setOnClickListener
+                }
+                proxySettingsManager.edit {
+                    putString(getString(R.string.proxy_host_key), host)
+                    putString(getString(R.string.proxy_port_key), port)
+                    putString(
+                        getString(R.string.proxy_type_key),
+                        if (binding.proxyTypeSocks.isChecked) "SOCKS5" else "HTTP"
+                    )
+                    putString(getString(R.string.proxy_username_key), binding.proxyUsernameInput.text?.toString()?.trim().orEmpty())
+                    putString(getString(R.string.proxy_password_key), binding.proxyPasswordInput.text?.toString().orEmpty())
+                }
+                pref.summary = "$host:$port"
+                (context ?: CloudStreamApp.context)?.let { ctx ->
+                    app.initClient(ctx)
+                    insecureApp.initClient(ctx, ignoreSSL = true)
+                }
+                dialog.dismissSafe(activity)
+            }
+            binding.cancelBtt.setOnClickListener {
+                dialog.dismissSafe(activity)
+            }
             return@setOnPreferenceClickListener true
         }
 

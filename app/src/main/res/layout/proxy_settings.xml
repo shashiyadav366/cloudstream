@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="10dp"
+        android:id="@+id/text1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+
+        android:layout_gravity="center_vertical"
+        android:layout_rowWeight="1"
+
+        android:paddingStart="?android:attr/listPreferredItemPaddingStart"
+        android:paddingEnd="?android:attr/listPreferredItemPaddingEnd"
+        android:textColor="?attr/textColor"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:text="@string/proxy_address_title" />
+
+    <TextView
+        android:layout_marginBottom="10dp"
+
+        android:id="@+id/text2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+
+        android:layout_gravity="center_vertical"
+        android:layout_rowWeight="1"
+
+        android:paddingStart="?android:attr/listPreferredItemPaddingStart"
+        android:paddingEnd="?android:attr/listPreferredItemPaddingEnd"
+        android:textColor="?attr/grayTextColor"
+        android:textSize="15sp"
+        android:text="@string/proxy_address_hint" />
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_marginBottom="60dp"
+        android:layout_marginHorizontal="10dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <EditText
+            android:textColorHint="?attr/grayTextColor"
+            android:hint="@string/proxy_host"
+            android:autofillHints="username"
+            android:id="@+id/proxy_host_input"
+            android:nextFocusDown="@id/proxy_port_input"
+            android:requiresFadingEdge="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            tools:ignore="LabelFor" />
+
+        <EditText
+            android:textColorHint="?attr/grayTextColor"
+            android:hint="@string/proxy_port"
+            android:autofillHints="no"
+            android:id="@+id/proxy_port_input"
+            android:nextFocusUp="@id/proxy_host_input"
+            android:nextFocusDown="@id/proxy_type_http"
+            android:requiresFadingEdge="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            tools:ignore="LabelFor" />
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/proxy_type_group"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/proxy_type_http"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:nextFocusDown="@id/proxy_username_input"
+                android:text="@string/proxy_type_http" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/proxy_type_socks"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:nextFocusDown="@id/proxy_username_input"
+                android:text="@string/proxy_type_socks5" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <EditText
+            android:textColorHint="?attr/grayTextColor"
+            android:hint="@string/proxy_username"
+            android:autofillHints="username"
+            android:id="@+id/proxy_username_input"
+            android:nextFocusUp="@id/proxy_type_http"
+            android:nextFocusDown="@id/proxy_password_input"
+            android:requiresFadingEdge="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            tools:ignore="LabelFor" />
+
+        <EditText
+            android:textColorHint="?attr/grayTextColor"
+            android:hint="@string/proxy_password"
+            android:autofillHints="password"
+            android:id="@+id/proxy_password_input"
+            android:nextFocusUp="@id/proxy_username_input"
+            android:nextFocusDown="@id/apply_btt"
+            android:requiresFadingEdge="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            tools:ignore="LabelFor" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/apply_btt_holder"
+        android:orientation="horizontal"
+        android:layout_gravity="bottom"
+        android:gravity="bottom|end"
+        android:layout_marginTop="-60dp"
+        android:layout_width="match_parent"
+        android:layout_height="60dp">
+
+        <com.google.android.material.button.MaterialButton
+            style="@style/WhiteButton"
+            android:layout_gravity="center_vertical|end"
+            android:text="@string/ok"
+            android:id="@+id/apply_btt"
+            android:layout_width="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            style="@style/BlackButton"
+            android:layout_gravity="center_vertical|end"
+            android:text="@string/sort_cancel"
+            android:id="@+id/cancel_btt"
+            android:layout_width="wrap_content" />
+    </LinearLayout>
+</LinearLayout>
