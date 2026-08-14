@@ -64,6 +64,7 @@
             android:title="@string/add_site_pref" />
 
         <Preference
+            android:defaultValue="4"
             android:icon="@drawable/ic_baseline_dns_24"
             android:key="@string/dns_key"
             android:summary="@string/dns_pref_summary"
@@ -75,6 +76,24 @@
             android:key="@string/jsdelivr_proxy_key"
             android:summary="@string/jsdelivr_proxy_summary"
             android:title="@string/jsdelivr_proxy" />
+
+        <Preference
+            android:icon="@drawable/ic_baseline_block_24"
+            android:key="@string/blocked_links_key"
+            android:summary="@string/blocked_links_summary"
+            android:title="@string/blocked_links_title" />
+
+        <SwitchPreference
+            android:defaultValue="false"
+            android:icon="@drawable/baseline_network_ping_24"
+            android:key="@string/proxy_enabled_key"
+            android:summary="@string/proxy_settings_summary"
+            android:title="@string/proxy_settings_title" />
+
+        <Preference
+            android:icon="@drawable/baseline_network_ping_24"
+            android:key="@string/proxy_address_key"
+            android:title="@string/proxy_address_title" />
 
     </PreferenceCategory>
 

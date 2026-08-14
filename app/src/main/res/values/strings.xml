@@ -248,6 +248,21 @@
     <string name="delete_files">Delete Files</string>
     <string name="delete_format" formatted="true">Delete (%1$d | %2$s)</string>
     <string name="cancel">Cancel</string>
+    <string name="blocked_links_title">Blocked External Links</string>
+    <string name="blocked_links_summary">Block up to 5 external URLs/domains from opening in the browser.</string>
+    <string name="blocked_links_dialog_hint">Enter one URL or domain per line. A maximum of 5 entries is saved, and matching includes subdomains.</string>
+    <string name="blocked_links_too_many">Only the first 5 entries are saved.</string>
+    <string name="proxy_settings_title">Proxy</string>
+    <string name="proxy_settings_summary">Route app traffic through an HTTP or SOCKS5 proxy (useful for geo-blocked extensions).</string>
+    <string name="proxy_address_title">Proxy Address</string>
+    <string name="proxy_address_hint">The proxy must be located in the country the content is available in (e.g. Bangladesh). SOCKS5 does not support authentication.</string>
+    <string name="proxy_host">Proxy Host (e.g. 1.2.3.4 or proxy.example.com)</string>
+    <string name="proxy_port">Proxy Port (e.g. 8080)</string>
+    <string name="proxy_type_http">HTTP</string>
+    <string name="proxy_type_socks5">SOCKS5</string>
+    <string name="proxy_username">Username (optional)</string>
+    <string name="proxy_password">Password (optional)</string>
+    <string name="proxy_invalid">Invalid proxy configuration.</string>
     <string name="pause">Pause</string>
     <string name="start">Start</string>
     <string name="test_failed">Failed</string>
@@ -335,6 +350,7 @@
     <string name="check_for_update">Check for Update</string>
     <string name="video_lock">Lock</string>
 	<string name="minimize">Minimize</string>
+    <string name="mute">Mute</string>
     <string name="video_aspect_ratio_resize">Resize</string>
     <string name="video_source">Source</string>
     <string name="video_skip_op">Skip OP</string>

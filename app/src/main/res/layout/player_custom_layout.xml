@@ -874,12 +874,12 @@
 
 
                             <com.google.android.material.button.MaterialButton
-        android:id="@+id/player_minimize"
-        style="@style/VideoButton"
-        android:nextFocusLeft="@id/player_lock"
-        android:nextFocusRight="@id/player_rotate_btt"
-        android:text="@string/minimize"
-        app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
+                                android:id="@+id/player_minimize"
+                                style="@style/VideoButton"
+                                android:nextFocusLeft="@id/player_lock"
+                                android:nextFocusRight="@id/player_rotate_btt"
+                                android:text="@string/minimize"
+                                app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_rotate_btt"
@@ -936,9 +936,18 @@
                                 android:layout_height="40dp"
 
                                 android:nextFocusLeft="@id/player_sources_btt"
-                                android:nextFocusRight="@id/player_skip_op"
+                                android:nextFocusRight="@id/player_mute_btt"
                                 android:text="@string/tracks"
                                 app:icon="@drawable/ic_baseline_equalizer_24" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/player_mute_btt"
+                                style="@style/VideoButton"
+                                android:layout_height="40dp"
+                                android:nextFocusLeft="@id/player_tracks_btt"
+                                android:nextFocusRight="@id/player_skip_op"
+                                android:text="@string/mute"
+                                app:icon="@drawable/ic_baseline_volume_up_24" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_skip_op"

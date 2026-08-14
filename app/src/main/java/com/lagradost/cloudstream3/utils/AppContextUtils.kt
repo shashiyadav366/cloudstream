@@ -591,6 +591,10 @@ object AppContextUtils {
         fallbackWebview: Boolean = false,
         fragment: Fragment? = null,
     ) = (this.getActivity() ?: activity)?.runOnUiThread {
+        if (LinkBlocker.isBlocked(url)) {
+            Log.i("CloudStream", "Blocked external browser: $url")
+            return@runOnUiThread
+        }
         try {
             val intent = Intent(Intent.ACTION_VIEW)
             intent.data = url.toUri()

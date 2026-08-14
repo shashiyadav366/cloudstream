@@ -58,11 +58,12 @@ fun OkHttpClient.Builder.addCloudFlareDns() = (
 fun OkHttpClient.Builder.addAdGuardDns() = (
         addGenericDns(
             "https://dns.adguard.com/dns-query",
-            // https://github.com/AdguardTeam/AdGuardDNS
+            // https://adguard-dns.io/public-dns.html
             listOf(
-                // "Non-filtering"
-                "94.140.14.140",
-                "94.140.14.141",
+                "94.140.14.14",
+                "94.140.15.15",
+                "2620:fe::fe",
+                "2a10:50c0::ad1:ff",
             )
         ))
 

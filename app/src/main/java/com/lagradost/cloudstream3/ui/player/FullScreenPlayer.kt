@@ -918,6 +918,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
             KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_VOLUME_MUTE -> {
                 player.handleEvent(CSPlayerEvent.ToggleMute)
+                updateMuteButton()
             }
 
             KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_NUMPAD_9, KeyEvent.KEYCODE_9 -> {
@@ -1088,6 +1089,21 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         playerHostView?.gestureHelper?.resetRewindText()
     }
 
+    /** Keeps the mute button icon in sync with the current player volume. */
+    private fun updateMuteButton() {
+        val button = playerBinding?.playerMuteBtt ?: return
+        val isMuted = player.getVolume() <= 0f
+        button.setIconResource(
+            if (isMuted) R.drawable.ic_baseline_volume_off_24
+            else R.drawable.ic_baseline_volume_up_24
+        )
+    }
+
+    override fun playerUpdated(player: Any?) {
+        super.playerUpdated(player)
+        updateMuteButton()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         // As this is video specific it is better to not do any setKey/getKey
         outState.putLong(SUBTITLE_DELAY_BUNDLE_KEY, subtitleDelay)
@@ -1250,6 +1266,12 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             playerLock.setOnClickListener {
                 autoHide()
                 toggleLock()
+            }
+
+            playerMuteBtt.setOnClickListener {
+                autoHide()
+                player.handleEvent(CSPlayerEvent.ToggleMute)
+                updateMuteButton()
             }
 
            playerMinimize.setOnClickListener {
