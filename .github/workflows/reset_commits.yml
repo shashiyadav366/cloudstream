@@ -19,8 +19,8 @@ jobs:
 
       - name: Create squashed commit
         run: |
-          BASE="7eebf275660d10a083c141a6ba18a421f52535c0"
-          CURRENT="ed021c4458e87f31b3ffe1aac36b7602d4fcc9e9"
+          BASE="fb78732d554aa4117b77f4ee4b19a7b0ba658730"
+          CURRENT="0f5a843677885c61d29a9b66a10d47965bea4e5c"
 
           echo "Base:"
           git show --no-patch --oneline "$BASE"

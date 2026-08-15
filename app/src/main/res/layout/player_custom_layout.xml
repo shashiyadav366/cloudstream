@@ -874,11 +874,11 @@
 
 
                             <com.google.android.material.button.MaterialButton
-                                android:id="@+id/player_minimize"
+                                android:id="@+id/player_pip"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_lock"
                                 android:nextFocusRight="@id/player_rotate_btt"
-                                android:text="@string/minimize"
+                                android:text="@string/picture_in_picture"
                                 app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
 
                             <com.google.android.material.button.MaterialButton

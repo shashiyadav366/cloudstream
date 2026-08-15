@@ -1050,7 +1050,7 @@
                             android:nextFocusRight="@id/player_skip_op"
                             android:nextFocusUp="@id/player_pause_play"
                             android:nextFocusDown="@id/player_skip_op"
-                            android:text="@string/minimize"
+                            android:text="@string/picture_in_picture"
                             app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
 
                         <com.google.android.material.button.MaterialButton

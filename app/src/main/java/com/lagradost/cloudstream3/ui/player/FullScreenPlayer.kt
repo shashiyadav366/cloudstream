@@ -58,6 +58,7 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.shouldShowPlayerMetadata
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.attachBackPressedCallback
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.detachBackPressedCallback
 import com.lagradost.cloudstream3.utils.DataStoreHelper
+import com.lagradost.cloudstream3.utils.DataStore.getDefaultSharedPrefs
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
@@ -1273,11 +1274,17 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 player.handleEvent(CSPlayerEvent.ToggleMute)
                 updateMuteButton()
             }
-
-           playerMinimize.setOnClickListener {
+            
+playerPip.isVisible = requireContext()
+    .getDefaultSharedPrefs()
+    .getBoolean(
+        getString(R.string.pip_enabled_key),
+        true
+    )
+playerPip.setOnClickListener {
     autoHide()
     enterPip(requireActivity())
-           } 
+}
 
             playerSubtitleOffsetBtt.setOnClickListener {
                 showSubtitleOffsetDialog()
