@@ -518,14 +518,15 @@ private val homeNonePadding: View =
 
         fun bind() {
     headReloadProvider?.setOnClickListener {
-        viewModel.loadAndCancel(
-            viewModel.apiName.value ?: noneApi.name,
-            forceReload = true,
-            fromUI = true
-        )
+        viewModel.apiName.value?.let { apiName ->
+            viewModel.loadAndCancel(
+                apiName,
+                forceReload = true,
+                fromUI = true
+            )
+        }
     }
 }
-
         init {
             previewViewpager.setPageTransformer(HomeScrollTransformer())
 
