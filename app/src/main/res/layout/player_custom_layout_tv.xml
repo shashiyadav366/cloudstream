@@ -1042,17 +1042,7 @@
                                 android:visibility="gone"
                                 app:icon="@drawable/video_locked" />
                         </FrameLayout>
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/player_minimize"
-                            style="@style/VideoButtonTV"
-                            android:nextFocusLeft="@id/player_skip_episode"
-                            android:nextFocusRight="@id/player_skip_op"
-                            android:nextFocusUp="@id/player_pause_play"
-                            android:nextFocusDown="@id/player_skip_op"
-                            android:text="@string/picture_in_picture"
-                            app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
-
+                        
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/player_rotate_btt"
                             style="@style/VideoButton"
@@ -1060,8 +1050,7 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/player_skip_op"
-                            style="@style/VideoButtonTV"
-                            android:nextFocusLeft="@id/player_minimize"
+                            style="@style/VideoButtonTV"                     
                             android:nextFocusRight="@id/player_skip_episode"
                             android:nextFocusUp="@id/player_pause_play"
                             android:nextFocusDown="@id/player_skip_episode"

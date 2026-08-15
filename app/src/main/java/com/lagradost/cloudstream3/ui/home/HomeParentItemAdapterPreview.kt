@@ -516,15 +516,7 @@ private val homeNonePadding: View =
 
         private val toggleListHolder: ChipGroup? = itemView.findViewById(R.id.home_type_holder)
 
-        fun bind() {
-    headReloadProvider?.setOnClickListener {
-    viewModel.loadAndCancel(
-        viewModel.apiName.value ?: "",
-        forceReload = true,
-        fromUI = true
-    )
-}
-        }
+        fun bind() = Unit
 
         init {
             previewViewpager.setPageTransformer(HomeScrollTransformer())

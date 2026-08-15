@@ -870,16 +870,7 @@
                             android:id="@+id/player_lock_holder"
                             android:layout_width="wrap_content"
                             android:layout_height="match_parent"
-                            android:orientation="horizontal">
-
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/player_pip"
-                                style="@style/VideoButton"
-                                android:nextFocusLeft="@id/player_lock"
-                                android:nextFocusRight="@id/player_rotate_btt"
-                                android:text="@string/picture_in_picture"
-                                app:icon="@drawable/ic_baseline_picture_in_picture_alt_24" />
+                            android:orientation="horizontal">                            
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_rotate_btt"

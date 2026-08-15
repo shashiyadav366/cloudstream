@@ -19,8 +19,8 @@ jobs:
 
       - name: Create squashed commit
         run: |
-          BASE="fb78732d554aa4117b77f4ee4b19a7b0ba658730"
-          CURRENT="0f5a843677885c61d29a9b66a10d47965bea4e5c"
+          BASE="d7e62496ae1f5ad02a67c135caa8761847d51bca"
+          CURRENT="a8f89f34735d1f69b47189d564a39bc0774aa6c0"
 
           echo "Base:"
           git show --no-patch --oneline "$BASE"
@@ -46,7 +46,7 @@ jobs:
           Squash changes after 7eebf275
 
           
-          // Added Refresh button to refresh current Plug-in for mobile and tablet
+          // Removed PIP Button from UI
           
           EOF
 
