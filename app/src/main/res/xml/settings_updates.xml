@@ -51,13 +51,6 @@
             android:key="@string/automatic_backup_key"
             android:title="@string/backup_frequency" />
 
-        <SwitchPreference
-            android:defaultValue="false"
-            android:icon="@drawable/baseline_restore_page_24"
-            android:key="@string/auto_restore_key"
-            android:summary="@string/auto_restore_summary"
-            android:title="@string/auto_restore_title" />
-
         <Preference
             android:icon="@drawable/baseline_restore_page_24"
             android:key="@string/restore_key"

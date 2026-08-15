@@ -141,7 +141,6 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.updateHasTrailers
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.attachBackPressedCallback
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.detachBackPressedCallback
 import com.lagradost.cloudstream3.utils.BackupUtils.backup
-import com.lagradost.cloudstream3.utils.BackupUtils.autoRestoreAfterBackup
 import com.lagradost.cloudstream3.utils.BackupUtils.setUpBackup
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.BiometricCallback
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.biometricPrompt
@@ -1206,9 +1205,6 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         app.initClient(this, ignoreSSL = false)
         @OptIn(UnsafeSSL::class)
         insecureApp.initClient(this, ignoreSSL = true)
-
-        // Pull the latest backup on app open when auto-restore is enabled
-        autoRestoreAfterBackup(this)
 
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
 
