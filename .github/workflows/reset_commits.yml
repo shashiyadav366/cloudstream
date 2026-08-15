@@ -1,0 +1,62 @@
+name: Squash Changes After Base Commit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  squash:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Create squashed commit
+        run: |
+          BASE="7eebf275660d10a083c141a6ba18a421f52535c0"
+          CURRENT="ed021c4458e87f31b3ffe1aac36b7602d4fcc9e9"
+
+          echo "Base:"
+          git show --no-patch --oneline "$BASE"
+
+          echo "Current:"
+          git show --no-patch --oneline "$CURRENT"
+
+          # Configure Git identity for the new commit
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Make the working tree exactly match CURRENT
+          git read-tree "$CURRENT"
+
+          # Move HEAD to BASE
+          git reset "$BASE"
+
+          # Stage the complete final state
+          git add -A
+
+          # Create commit message
+          cat > /tmp/commit_message <<'EOF'
+          Squash changes after 7eebf275
+
+          
+          // Added Refresh button to refresh current Plug-in for mobile and tablet
+          
+          EOF
+
+          # Create ONE new commit on top of BASE
+          git commit -F /tmp/commit_message
+
+          echo "Created commit:"
+          git log -2 --oneline
+
+      - name: Force update master
+        run: |
+          git push origin HEAD:master --force
+          

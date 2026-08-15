@@ -13,6 +13,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp" />
 
+    <!-- Preview area -->
     <FrameLayout
         android:id="@+id/home_preview_viewpager_text"
         android:layout_width="match_parent"
@@ -22,10 +23,9 @@
             android:id="@+id/home_preview_viewpager"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="horizontal">
+            android:orientation="horizontal" />
 
-        </androidx.viewpager2.widget.ViewPager2>
-
+        <!-- Search / refresh / profile header -->
         <LinearLayout
             android:id="@+id/home_padding"
             android:layout_width="match_parent"
@@ -34,17 +34,15 @@
             android:orientation="horizontal"
             android:paddingHorizontal="0dp">
 
-
             <androidx.appcompat.widget.SearchView
                 android:id="@+id/home_search"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
-                android:editTextColor="@color/white"
                 android:gravity="center_vertical"
                 android:iconifiedByDefault="true"
-                android:nextFocusRight="@id/home_head_profile_padding"
+                android:nextFocusRight="@id/home_head_reload_provider"
                 android:padding="0dp"
                 android:textColor="@color/white"
                 android:textColorHint="@color/white"
@@ -55,6 +53,23 @@
                 app:searchIcon="@drawable/search_icon"
                 tools:ignore="RtlSymmetry" />
 
+            <!-- Refresh current provider -->
+            <ImageView
+                android:id="@+id/home_head_reload_provider"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:layout_gravity="center"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/reload_provider"
+                android:focusable="true"
+                android:nextFocusLeft="@id/home_search"
+                android:nextFocusRight="@id/home_head_profile_padding"
+                android:padding="13dp"
+                android:src="@drawable/ic_refresh"
+                app:tint="@color/white" />
+
+            <!-- Profile -->
             <LinearLayout
                 android:id="@+id/home_head_profile_padding"
                 android:layout_width="50dp"
@@ -63,7 +78,7 @@
                 android:focusable="true"
                 android:foreground="@drawable/rounded_select_ripple"
                 android:gravity="center"
-                android:nextFocusLeft="@id/home_search"
+                android:nextFocusLeft="@id/home_head_reload_provider"
                 android:orientation="horizontal">
 
                 <androidx.cardview.widget.CardView
@@ -83,28 +98,14 @@
                         android:contentDescription="@string/account"
                         android:scaleType="centerCrop"
                         tools:src="@drawable/profile_bg_orange" />
+
                 </androidx.cardview.widget.CardView>
+
             </LinearLayout>
+
         </LinearLayout>
 
-        <!--
-                        <TextView
-                            android:visibility="gone"
-                            android:id="@+id/test_search"
-                            android:background="?android:attr/selectableItemBackgroundBorderless"
-                            android:layout_gravity="start"
-                            android:gravity="center"
-
-                            android:textSize="20dp"
-                            android:layout_margin="20dp"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/search"
-                            android:textColor="@color/white"
-                            app:drawableLeftCompat="@drawable/search_icon"
-                            app:tint="@color/white" />
-        -->
-
+        <!-- Preview buttons -->
         <LinearLayout
             android:id="@+id/home_preview_title_holder"
             android:layout_width="match_parent"
@@ -132,6 +133,7 @@
                 android:id="@+id/home_preview_play"
                 style="@style/WhiteButton"
                 android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:layout_gravity="center"
                 android:text="@string/home_play"
                 app:icon="@drawable/ic_baseline_play_arrow_24" />
@@ -155,6 +157,7 @@
 
     </FrameLayout>
 
+    <!-- Alternative account -->
     <LinearLayout
         android:id="@+id/alternative_account_padding"
         android:layout_width="match_parent"
@@ -191,11 +194,14 @@
                     android:contentDescription="@string/account"
                     android:scaleType="centerCrop"
                     tools:src="@drawable/profile_bg_orange" />
+
             </androidx.cardview.widget.CardView>
+
         </LinearLayout>
+
     </LinearLayout>
 
-
+    <!-- Continue watching -->
     <LinearLayout
         android:id="@+id/home_watch_holder"
         android:layout_width="match_parent"
@@ -230,6 +236,7 @@
 
     </LinearLayout>
 
+    <!-- Bookmarked -->
     <LinearLayout
         android:id="@+id/home_bookmarked_holder"
         android:layout_width="match_parent"
@@ -240,7 +247,6 @@
 
         <FrameLayout
             android:id="@+id/home_bookmark_parent_item_title"
-
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="?android:attr/selectableItemBackground">
@@ -250,14 +256,12 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="50dp"
                 android:fadingEdge="horizontal"
-
                 android:nextFocusLeft="@id/nav_rail_view"
                 android:nextFocusUp="@id/home_watch_child_recyclerview"
                 android:nextFocusForward="@id/home_bookmarked_child_recyclerview"
                 android:paddingStart="12dp"
                 android:paddingTop="5dp"
                 android:paddingEnd="12dp"
-
                 android:paddingBottom="5dp"
                 android:requiresFadingEdge="horizontal">
 
@@ -271,7 +275,6 @@
                         style="@style/ChipFilled"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-
                         android:nextFocusLeft="@id/nav_rail_view"
                         android:nextFocusRight="@id/home_plan_to_watch_btt"
                         android:text="@string/type_watching" />
@@ -281,7 +284,6 @@
                         style="@style/ChipFilled"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-
                         android:nextFocusLeft="@id/home_type_watching_btt"
                         android:nextFocusRight="@id/home_type_on_hold_btt"
                         android:text="@string/type_plan_to_watch" />
@@ -291,7 +293,6 @@
                         style="@style/ChipFilled"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-
                         android:nextFocusLeft="@id/home_plan_to_watch_btt"
                         android:nextFocusRight="@id/home_type_dropped_btt"
                         android:text="@string/type_on_hold" />
@@ -301,7 +302,6 @@
                         style="@style/ChipFilled"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-
                         android:nextFocusLeft="@id/home_type_on_hold_btt"
                         android:nextFocusRight="@id/home_type_completed_btt"
                         android:text="@string/type_dropped" />
@@ -310,10 +310,10 @@
                         android:id="@+id/home_type_completed_btt"
                         style="@style/ChipFilled"
                         android:layout_width="wrap_content"
-
                         android:layout_height="wrap_content"
                         android:nextFocusLeft="@id/home_type_dropped_btt"
                         android:text="@string/type_completed" />
+
                 </com.google.android.material.chip.ChipGroup>
 
             </HorizontalScrollView>
@@ -326,6 +326,7 @@
                 android:contentDescription="@string/home_more_info"
                 android:src="@drawable/ic_baseline_arrow_forward_24"
                 app:drawableTint="?attr/white" />
+
         </FrameLayout>
 
         <androidx.recyclerview.widget.RecyclerView
@@ -338,5 +339,7 @@
             android:paddingHorizontal="5dp"
             app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
             tools:listitem="@layout/home_result_grid" />
+
     </LinearLayout>
+
 </LinearLayout>
