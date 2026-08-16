@@ -17,11 +17,14 @@ import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import androidx.viewpager2.widget.ViewPager2
+import android.widget.Toast
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarItemView
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
+import com.lagradost.cloudstream3.CommonActivity.showToast
+import com.lagradost.cloudstream3.ui.APIRepository.Companion.noneApi
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainActivity
@@ -518,13 +521,12 @@ private val homeNonePadding: View =
 
         fun bind() {
     headReloadProvider?.setOnClickListener {
-        viewModel.apiName.value?.let { apiName ->
-            viewModel.loadAndCancel(
-                apiName,
-                forceReload = true,
-                fromUI = true
-            )
-        }
+        viewModel.loadAndCancel(
+            viewModel.apiName.value ?: noneApi.name,
+            forceReload = true,
+            fromUI = true
+        )
+        showToast(R.string.action_reload, Toast.LENGTH_SHORT)
     }
 }
         init {
