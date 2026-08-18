@@ -101,125 +101,117 @@ object PlayerPipHelper {
         )
     }
 
-    fun updatePIPModeActions(
-        activity: Activity?,
-        status: CSPlayerLoading,
-        pipEnabled: Boolean,
-        aspectRatio: Rational?
-    ) {
-        // Is it even desired to enter pip mode right now if we ignore all settings?
-        // This does not check for isPIPPossible as that is deferred to later
-        val isPipDesired = when (status) {
-            CSPlayerLoading.IsBuffering, CSPlayerLoading.IsPlaying -> pipEnabled
-            else -> false
+    
+fun updatePIPModeActions(
+    activity: Activity?,
+    status: CSPlayerLoading,
+    pipEnabled: Boolean,
+    aspectRatio: Rational?
+) {
+    val isPipDesired = when (status) {
+        CSPlayerLoading.IsBuffering,
+        CSPlayerLoading.IsPlaying -> pipEnabled
+        else -> false
+    }
+
+    // Always update the global state first.
+    CommonActivity.isPipDesired = isPipDesired
+
+    if (activity == null) return
+
+    // For Android 12+, this is the switch that controls automatic PiP.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        safe {
+            val builder = PictureInPictureParams.Builder()
+
+            builder.setAutoEnterEnabled(
+                isPipDesired &&
+                    activity.isPIPPossible() &&
+                    !activity.isFinishing &&
+                    !activity.isDestroyed
+            )
+
+            aspectRatio?.toFloat()
+                ?.coerceIn(0.41841f, 2.39f)
+                ?.let {
+                    builder.setAspectRatio(
+                        Rational(
+                            (it * 100000).roundToInt(),
+                            100000
+                        )
+                    )
+                }
+
+            activity.setPictureInPictureParams(builder.build())
         }
 
-        // On lower api ver setPictureInPictureParams is not supported,
-        // so we enter pip manually in onUserLeaveHint
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            CommonActivity.isPipDesired = isPipDesired
-            return
-        }
+        return
+    }
 
-        if(activity == null) return
-
-        val actions: ArrayList<RemoteAction> = ArrayList()
-        actions.add(
-            getRemoteAction(
-                activity,
-                R.drawable.baseline_headphones_24,
-                R.string.audio_singular,
-                CSPlayerEvent.PlayAsAudio
-            )
-        )
-        /*actions.add(
-            getRemoteAction(
-                activity,
-                R.drawable.go_back_30,
-                R.string.go_back_30,
-                CSPlayerEvent.SeekBack
-            )
-        )*/
-
-        if (status == CSPlayerLoading.IsPlaying) {
-            actions.add(
-                getRemoteAction(
-                    activity,
-                    R.drawable.netflix_pause,
-                    R.string.pause,
-                    CSPlayerEvent.Pause
-                )
-            )
-        } else {
-            actions.add(
-                getRemoteAction(
-                    activity,
-                    R.drawable.ic_baseline_play_arrow_24,
-                    R.string.pause,
-                    CSPlayerEvent.Play
-                )
-            )
-        }
-
-        actions.add(
-            getRemoteAction(
-                activity,
-                R.drawable.go_forward_30,
-                R.string.go_forward_30,
-                CSPlayerEvent.SeekForward
-            )
-        )
-
-        // Necessary to prevent crashing.
-        val mixAspectRatio = 0.41841f // ~1/2.39
-        val maxAspectRatio = 2.39f // widescreen standard
-        val ratioAccuracy = 100000 // To convert the float to int
-
-        // java.lang.IllegalArgumentException: setPictureInPictureParams: Aspect ratio is too extreme
-        // (must be between 0.418410 and 2.390000)
-        val fixedRational =
-            aspectRatio?.toFloat()?.coerceIn(mixAspectRatio, maxAspectRatio)?.let {
-                Rational((it * ratioAccuracy).roundToInt(), ratioAccuracy)
-            }
-
+    // Android O–R: PiP is entered manually from onUserLeaveHint().
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         safe {
             activity.setPictureInPictureParams(
                 PictureInPictureParams.Builder()
-                    .apply {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            setSeamlessResizeEnabled(true)
-                            setAutoEnterEnabled(isPipDesired && activity.isPIPPossible())
-                        } else {
-                            // We enter pip manually in onUserLeaveHint as the smooth transition
-                            // is not supported yet
-                            CommonActivity.isPipDesired = isPipDesired
-                        }
-                    }
-                    .setAspectRatio(fixedRational)
-                    .setActions(actions)
+                    .setAspectRatio(
+                        aspectRatio?.toFloat()
+                            ?.coerceIn(0.41841f, 2.39f)
+                            ?.let {
+                                Rational(
+                                    (it * 100000).roundToInt(),
+                                    100000
+                                )
+                            }
+                    )
+                    .build()
+            )
+        }
+    }
+}
+    
+        
+
+        
+    
+
+    fun exitPip(activity: Activity?) {
+    if (activity == null) return
+
+    CommonActivity.isPipDesired = false
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        safe {
+            activity.setPictureInPictureParams(
+                PictureInPictureParams.Builder()
+                    .setAutoEnterEnabled(false)
                     .build()
             )
         }
     }
 
-    /**
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        activity.isInPictureInPictureMode
+    ) {
+        activity.finishAndRemoveTask()
+    }
+}
+
+/**
  * Manually enter Picture-in-Picture mode.
  * Used by the Minimize button in the player.
  */
-fun enterPip(activity: Activity) {
-    if (!activity.isPIPPossible()) return
+fun enterPip(activity: Activity?) {
+    if (activity == null) return
 
-    try {
-        CommonActivity.isPipDesired = true
+    CommonActivity.isPipDesired = true
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            activity.enterPictureInPictureMode()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            @Suppress("DEPRECATION")
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        activity.isPIPPossible() &&
+        !activity.isInPictureInPictureMode
+    ) {
+        safe {
             activity.enterPictureInPictureMode()
         }
-    } catch (t: Throwable) {
-        logError(t)
     }
 }
 

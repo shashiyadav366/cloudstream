@@ -1573,46 +1573,48 @@ return exoPlayerBuilder.build().apply {
                     }
                 }
 
-                override fun onPlayerError(error: PlaybackException) {
-                    // If the Network fails then ignore the exception if the duration is set.
-                    // This is to switch mirrors automatically if the stream has not been fetched, but
-                    // allow playing the buffer without internet as then the duration is fetched.
-                    when {
-                        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
-                                && exoPlayer?.duration != TIME_UNSET -> {
-                            exoPlayer?.prepare()
-                        }
+               override fun onPlayerError(error: PlaybackException) {
+    when {
+        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+                && exoPlayer?.duration != TIME_UNSET -> {
+            exoPlayer?.prepare()
+        }
 
-                        error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
-                            // Re-initialize player at the current live window default position.
-                            exoPlayer?.seekToDefaultPosition()
-                            exoPlayer?.prepare()
-                        }
+        error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+            exoPlayer?.seekToDefaultPosition()
+            exoPlayer?.prepare()
+        }
 
-                        // PlaylistStuckException usually happens when the player position is ahead of the live window.
-                        // Seek to the default location in that case
-                        error.cause is HlsPlaylistTracker.PlaylistStuckException -> {
-                            val position = exoPlayer?.currentPosition ?: exoPlayer?.duration ?: 0
+        error.cause is HlsPlaylistTracker.PlaylistStuckException -> {
+            val position = exoPlayer?.currentPosition ?: exoPlayer?.duration ?: 0
+            val aheadOfLive =
+                LiveHelper.getLiveManager(exoPlayer)
+                    ?.getTimeAheadOfLive(position) ?: 0
 
-                            // Seek to live head
-                            val aheadOfLive = LiveHelper.getLiveManager(exoPlayer)?.getTimeAheadOfLive(position) ?: 0
+            if (aheadOfLive > 100) {
+                exoPlayer?.seekTo(position - aheadOfLive)
+            } else {
+                exoPlayer?.seekToDefaultPosition()
+            }
 
-                            if (aheadOfLive > 100) {
-                                exoPlayer?.seekTo(position - aheadOfLive)
-                            } else {
-                                exoPlayer?.seekToDefaultPosition()
-                            }
-                            exoPlayer?.prepare()
-                        }
+            exoPlayer?.prepare()
+        }
 
+        else -> {
+    // Broken / non-playable video.
+    PlayerPipHelper.updatePIPModeActions(
+        activity = activity,
+        status = CSPlayerLoading.IsPaused,
+        pipEnabled = false,
+        aspectRatio = null
+    )
 
-                        else -> {
-                            event(ErrorEvent(error))
-                        }
-                    }
+    event(ErrorEvent(error))
+}
+    }
 
-                    super.onPlayerError(error)
-                }
+    super.onPlayerError(error)
+               }
 
                 //override fun onCues(cues: MutableList<Cue>) {
                 //    super.onCues(cues.map { cue -> cue.buildUpon().setText("Hello world").setSize(Cue.DIMEN_UNSET).build() })

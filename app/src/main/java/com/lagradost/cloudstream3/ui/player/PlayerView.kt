@@ -463,9 +463,11 @@ class PlayerView @JvmOverloads constructor(
 
     /** Releases all player resources. */
     fun release() {
+        callbacks?.playerUpdated(null)
         player.release()
         player.releaseCallbacks()
         player = CS3IPlayer()
+        
 
         // keyEventListener is deregistered in onPause so that the incoming player's
         // onResume can register its own listener without racing against release().

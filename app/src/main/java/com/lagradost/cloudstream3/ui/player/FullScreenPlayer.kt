@@ -38,6 +38,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.google.android.material.button.MaterialButton
+import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.CommonActivity.keyEventListener
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.R
@@ -462,8 +463,12 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 // netflix capture back and hide ~monke
                 onClickChange()
             } else {
-                activity?.popCurrentPage("FullScreenPlayer")
-            }
+    if (player.isActive() && CommonActivity.isPipDesired) {
+    activity?.let { enterPip(it) }
+} else {
+    activity?.popCurrentPage("FullScreenPlayer")
+}
+}
         }
         playerHostView?.requestUpdateBrightnessOverlayOnNextLayout()
         super.onResume()

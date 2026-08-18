@@ -19,8 +19,8 @@ jobs:
 
       - name: Create squashed commit
         run: |
-          BASE="d7e62496ae1f5ad02a67c135caa8761847d51bca"
-          CURRENT="a8f89f34735d1f69b47189d564a39bc0774aa6c0"
+          BASE="d71126d469cd76b51f2a769bee5e390bc55a5294"
+          CURRENT="98e5cbb6d37284840a4dc5cc9e2cbb043f8df44e"
 
           echo "Base:"
           git show --no-patch --oneline "$BASE"
@@ -43,7 +43,7 @@ jobs:
 
           # Create commit message
           cat > /tmp/commit_message <<'EOF'
-          Squash changes after 7eebf275
+          Add Native Pip Player
 
           
           // Removed PIP Button from UI

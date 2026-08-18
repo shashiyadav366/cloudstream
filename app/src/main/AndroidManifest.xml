@@ -159,6 +159,12 @@
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true" />
+        <activity
+    android:name=".ui.player.PlayerActivity"
+    android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+    android:resizeableActivity="true"
+    android:supportsPictureInPicture="true"
+    android:exported="false" />
 
         <activity
             android:name=".ui.account.AccountSelectActivity"

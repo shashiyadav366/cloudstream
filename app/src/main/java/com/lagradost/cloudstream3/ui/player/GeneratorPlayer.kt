@@ -55,7 +55,6 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.getAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getTMDbId
-import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.amap
@@ -76,6 +75,7 @@ import com.lagradost.cloudstream3.subtitles.AbstractSubtitleEntities
 import com.lagradost.cloudstream3.subtitles.AbstractSubtitleEntities.SubtitleSearch
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.subtitleProviders
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
+import com.lagradost.cloudstream3.ui.player.CSPlayerEvent
 import com.lagradost.cloudstream3.ui.player.CS3IPlayer.Companion.preferredAudioTrackLanguage
 import com.lagradost.cloudstream3.ui.player.CustomDecoder.Companion.updateForcedEncoding
 import com.lagradost.cloudstream3.ui.player.PlayerSubtitleHelper.Companion.toSubtitleMimeType
@@ -310,11 +310,18 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
 
                 override fun createCurrentContentIntent(player: Player): PendingIntent? {
-                    // Open the app without creating a new task to resume playback seamlessly
+                    // Open the full-screen player so tapping the notification brings
+                    // back the video instead of only the app home. REORDER_TO_FRONT
+                    // expands the existing PiP player when it is still alive; the
+                    // launch arguments re-open the same video if it was destroyed.
+                    val contentIntent = Intent(context, PlayerActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        arguments?.let { putExtras(it) }
+                    }
                     return PendingIntentCompat.getActivity(
                         context,
                         0,
-                        Intent(context, MainActivity::class.java),
+                        contentIntent,
                         0,
                         false
                     )
@@ -2210,22 +2217,47 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     @MainThread
-    fun releasePlayer() {
-        player.release()
-        currentSelectedSubtitles = null
-        currentSelectedLink = null
-        isPlayerActive.set(false)
-        binding?.overlayLoadingSkipButton?.isVisible = false
-        binding?.playerLoadingOverlay?.isVisible = true
-        viewModel.modifyState { setError(emptyList()) }
-        uiReset()
-    }
+fun releasePlayer() {
+    player.release()
+    currentSelectedSubtitles = null
+    currentSelectedLink = null
+    isPlayerActive.set(false)
+    binding?.overlayLoadingSkipButton?.isVisible = false
+    binding?.playerLoadingOverlay?.isVisible = true
+    viewModel.modifyState { setError(emptyList()) }
+    uiReset()
+}
 
-    fun exitPlayer() {
-        playerHostView?.exitFullscreen()
-        player.release()
-        activity?.popCurrentPage()
-    }
+private fun releaseMediaNotification() {
+    cachedPlayerNotificationManager?.setPlayer(null)
+    cachedPlayerNotificationManager = null
+}
+
+fun exitPlayer() {
+    releaseMediaNotification()
+
+    mMediaSession?.release()
+    mMediaSession = null
+
+    playerHostView?.release()
+
+    player.release()
+    activity?.popCurrentPage()
+}
+
+fun closePlayerForActivityDestroy() {
+    releaseMediaNotification()
+
+    mMediaSession?.release()
+    mMediaSession = null
+
+    playerHostView?.release()
+
+    player.release()
+}
+
+
+
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("index", viewModel.episodeIndex)
