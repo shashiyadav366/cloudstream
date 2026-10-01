@@ -19,6 +19,7 @@ import com.lagradost.cloudstream3.utils.ApkInstaller
 import com.lagradost.cloudstream3.utils.AppContextUtils.createNotificationChannel
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
+import com.lagradost.cloudstream3.utils.githubDownloadHeaders
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -80,7 +81,15 @@ class PackageInstallerService : Service() {
                     ApkInstaller.InstallProgressStatus.Downloading
                 )
 
-                val body = app.get(url).body
+                val response = app.get(url, headers = githubDownloadHeaders(this@PackageInstallerService))
+                val badContentType = response.headers["Content-Type"]?.let {
+                    it.contains("html") || it.contains("json") || it.contains("text")
+                } == true
+                if (!response.isSuccessful || badContentType) {
+                    Log.d("PackageInstallerService", "Update download failed (${response.code}) from $url")
+                    return false
+                }
+                val body = response.body
                 val inputStream = body.byteStream()
                 installer = ApkInstaller(this)
                 val totalSize = body.contentLength()

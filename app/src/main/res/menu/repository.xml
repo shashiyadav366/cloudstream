@@ -23,4 +23,10 @@
         android:title="@string/batch_download"
         app:showAsAction="collapseActionView|ifRoom"
         android:visible="false"/>
+    <item
+        android:id="@+id/delete_all"
+        android:icon="@drawable/ic_baseline_delete_outline_24"
+        android:title="@string/batch_delete"
+        app:showAsAction="collapseActionView|ifRoom"
+        android:visible="false"/>
 </menu>

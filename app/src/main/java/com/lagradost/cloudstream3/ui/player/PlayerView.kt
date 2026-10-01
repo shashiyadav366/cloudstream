@@ -116,6 +116,7 @@ class PlayerView @JvmOverloads constructor(
         fun prevEpisode() {}
         fun playerPositionChanged(position: Long, duration: Long) {}
         fun playerStatusChanged() {}
+        fun onPlaybackSpeedChanged() {}
         fun playerDimensionsLoaded(width: Int, height: Int) {}
         fun subtitlesChanged() {}
         fun embeddedSubtitlesFetched(subtitles: List<SubtitleData>) {}
@@ -130,7 +131,7 @@ class PlayerView @JvmOverloads constructor(
         /** Called after [PlayerView] finishes its own player-attached setup (MediaSession, ExoPlayer view). */
         fun playerUpdated(player: Any?) {}
         /** Called on a short single-tap on empty player area (no swipe, no double-tap). */
-        fun onSingleTap() {}
+        fun onSingleTap(x: Float, viewWidth: Int) {}
         /** Called when the hold-for-speedup gesture starts (show=true) or ends (show=false). */
         fun onHoldSpeedUp(show: Boolean) {}
         /** Called during brightness swipe with the current extra-brightness alpha (0–1). */
@@ -463,9 +464,11 @@ class PlayerView @JvmOverloads constructor(
 
     /** Releases all player resources. */
     fun release() {
+        callbacks?.playerUpdated(null)
         player.release()
         player.releaseCallbacks()
         player = CS3IPlayer()
+        
 
         // keyEventListener is deregistered in onPause so that the incoming player's
         // onResume can register its own listener without racing against release().
@@ -782,6 +785,7 @@ class PlayerView @JvmOverloads constructor(
             }
             is PauseEvent -> Unit
             is PlayEvent -> Unit
+            is PlaybackSpeedChangedEvent -> callbacks?.onPlaybackSpeedChanged()
         }
     }
 

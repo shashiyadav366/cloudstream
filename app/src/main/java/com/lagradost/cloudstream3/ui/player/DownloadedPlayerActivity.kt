@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.player.OfflinePlaybackHelper.playLink
 import com.lagradost.cloudstream3.ui.player.OfflinePlaybackHelper.playUri
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.attachBackPressedCallback
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.utils.UIHelper.enableEdgeToEdgeCompat
 
 class DownloadedPlayerActivity : AppCompatActivity() {
@@ -49,6 +50,40 @@ class DownloadedPlayerActivity : AppCompatActivity() {
         val oldText = safe { old.getStringExtra(Intent.EXTRA_TEXT) }
         val newText = safe { newIntent.getStringExtra(Intent.EXTRA_TEXT) }
         return oldText != null && oldText == newText
+    }
+
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode, options)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

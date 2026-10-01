@@ -1,12 +1,13 @@
 package com.lagradost.cloudstream3.utils
 
-import android.app.Activity
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.WorkerThread
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
 import androidx.preference.PreferenceManager
@@ -14,6 +15,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY_LOCAL
@@ -26,7 +28,10 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.DataStore.getDefaultSharedPrefs
+import com.lagradost.cloudstream3.utils.DataStore.getKey
 import com.lagradost.cloudstream3.utils.DataStore.getSharedPrefs
+import com.lagradost.cloudstream3.utils.DataStore.removeKey
+import com.lagradost.cloudstream3.utils.DataStore.setKey
 import com.lagradost.cloudstream3.utils.UIHelper.checkWrite
 import com.lagradost.cloudstream3.utils.UIHelper.requestRW
 import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager.setupStream
@@ -39,7 +44,11 @@ import com.lagradost.safefile.MediaFileContentType
 import com.lagradost.safefile.SafeFile
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.internal.closeQuietly
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
 import java.io.PrintWriter
@@ -49,6 +58,32 @@ import java.util.Date
 import java.util.Locale
 
 object BackupUtils {
+
+    const val BACKUP_DESTINATION_LOCAL = "local"
+    const val BACKUP_DESTINATION_PATH_URL = "path_url"
+
+    /**
+     * One-shot flag set when a restore finishes. The activity is recreated right after a
+     * restore, so the confirmation is consumed by the next MainActivity instead of being
+     * tied to the activity that is about to be destroyed.
+     */
+    const val RESTORE_CONFIRMATION_KEY = "restore_confirmation_pending"
+
+    fun getBackupDestination(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.backup_destination_key), null)
+    }
+
+    fun getBackupUrl(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.backup_url_key), null)
+    }
+
+    fun getBackupToken(context: Context): String? {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getString(context.getString(R.string.github_token_key), null)
+            ?.takeIf { it.isNotBlank() }
+    }
 
     /**
      * No sensitive or breaking data in the backup
@@ -74,6 +109,9 @@ object BackupUtils {
         "download_path_key_visual",
         "backup_path_key",
         "backup_dir_path_key",
+
+        // GitHub token must not leave the device
+        "github_token",
 
         // When sharing backup we do not want to transfer what is essentially the password
         // Note that this is deprecated, and can be removed after all tokens have expired
@@ -110,7 +148,10 @@ object BackupUtils {
         QUEUE_KEY,
 
         // Prevent automatic plugin download after restoring backup
-        "auto_download_plugins_key2"
+        "auto_download_plugins_key2",
+
+        // One-shot UI flag, must neither be backed up nor restored
+        RESTORE_CONFIRMATION_KEY,
     )
 
     /** false if key should not be contained in backup */
@@ -200,6 +241,23 @@ object BackupUtils {
 
     fun backup(context: Context?) = ioSafe {
         if (context == null) return@ioSafe
+        if (getBackupDestination(context) == BACKUP_DESTINATION_PATH_URL) {
+            val path = getBackupUrl(context)
+            if (!path.isNullOrBlank()) {
+                backupToPathInternal(context, path)
+                return@ioSafe
+            }
+        }
+        backupLocalInternal(context)
+    }
+
+    /** Writes the backup to the given path or URL instead of the local backup folder. */
+    fun backupToPath(context: Context?, path: String) = ioSafe {
+        if (context == null) return@ioSafe
+        backupToPathInternal(context, path)
+    }
+
+    private fun backupLocalInternal(context: Context) {
         var fileStream: OutputStream? = null
         var printStream: PrintWriter? = null
 
@@ -207,7 +265,7 @@ object BackupUtils {
             if (!context.checkWrite()) {
                 showToast(R.string.backup_failed, Toast.LENGTH_LONG)
                 context.getActivity()?.requestRW()
-                return@ioSafe
+                return
             }
 
             val date = SimpleDateFormat("yyyy_MM_dd_HH_mm", Locale.getDefault()).format(Date(currentTimeMillis()))
@@ -235,6 +293,172 @@ object BackupUtils {
         }
     }
 
+    private fun backupToPathInternal(context: Context, path: String) {
+        var fileStream: OutputStream? = null
+        var printStream: PrintWriter? = null
+
+        try {
+            val backupFile = getBackup(context)
+            val json = backupFile.toJson()
+            if (path.startsWith("http://") || path.startsWith("https://")) {
+                val resolvedUrl = when (val gh = parseGitHubPath(path)) {
+                    null -> uploadToUrl(context, path, json)
+                    else -> githubUpload(context, gh, json)
+                }
+                if (resolvedUrl != path) {
+                    // Hosts like 0x0.st / paste.rs assign a new URL on upload,
+                    // remember it so future backups and restores use it automatically.
+                    PreferenceManager.getDefaultSharedPreferences(context).edit {
+                        putString(context.getString(R.string.backup_url_key), resolvedUrl)
+                    }
+                }
+                showToast(txt(R.string.backup_uploaded_format, resolvedUrl), Toast.LENGTH_LONG)
+                return
+            }
+
+            fileStream = backupPathToFile(context, path).openOutputStreamOrThrow(false)
+            printStream = PrintWriter(fileStream)
+            printStream.print(json)
+            showToast(txt(R.string.backup_saved_to_format, path), Toast.LENGTH_LONG)
+        } catch (e: Exception) {
+            logError(e)
+            try {
+                showToast(
+                    txt(R.string.backup_failed_error_format, e.toString()),
+                    Toast.LENGTH_LONG,
+                )
+            } catch (e: Exception) {
+                logError(e)
+            }
+        } finally {
+            printStream?.closeQuietly()
+            fileStream?.closeQuietly()
+        }
+    }
+
+    /**
+     * Uploads the backup with PUT, falling back to POST for endpoints that do
+     * not accept PUT requests. Returns the URL the file ended up at, which is
+     * usually the same as [url] but may be a new URL returned by the host.
+     */
+    @Throws(IOException::class)
+    private fun uploadToUrl(context: Context, url: String, json: String): String {
+        val body = json.toRequestBody("text/plain; charset=utf-8".toMediaType())
+        val putResponse =
+            app.baseClient.newCall(Request.Builder().url(url).put(body).build()).execute()
+        var response = putResponse
+        if (!putResponse.isSuccessful && putResponse.code in listOf(404, 405)) {
+            putResponse.close()
+            val postResponse =
+                app.baseClient.newCall(Request.Builder().url(url).post(body).build()).execute()
+            response = postResponse
+        }
+        return response.use {
+            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+            // The response body may contain the final file URL (e.g. paste hosts)
+            it.body?.string()?.let { bodyText ->
+                Regex("https?://[^\\s\"<>]+")
+                    .find(bodyText)
+                    ?.value
+                    ?.trimEnd('.', ',', ')', ']', '"', '\'')
+            } ?: url
+        }
+    }
+
+    private data class GitHubPath(
+        val owner: String,
+        val repo: String,
+        val branch: String,
+        val path: String,
+    )
+
+    @Serializable
+    private data class GitHubContentsResponse(
+        val sha: String? = null,
+        val message: String? = null,
+    )
+
+    private val githubRawRegex =
+        Regex("^https?://raw\\.githubusercontent\\.com/([^/]+)/([^/]+)/(?:refs/heads/)?([^/]+)/(.+)$")
+    private val githubBlobRegex =
+        Regex("^https?://github\\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$")
+
+    /** Extracts owner, repo, branch and file path from a GitHub file URL. */
+    private fun parseGitHubPath(url: String): GitHubPath? {
+        val match = githubRawRegex.find(url) ?: githubBlobRegex.find(url) ?: return null
+        return GitHubPath(match.groupValues[1], match.groupValues[2], match.groupValues[3], match.groupValues[4])
+    }
+
+    /**
+     * Uploads the backup to a GitHub repository via the Contents API using the
+     * token stored in settings. Returns the raw file URL used for restoring.
+     */
+    @Throws(IOException::class)
+    private fun githubUpload(context: Context, gh: GitHubPath, json: String): String {
+        val token = getBackupToken(context)
+            ?: throw IOException("GitHub token missing")
+        val apiUrl = "https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${gh.path}"
+
+        // Existing files need their sha to be updated
+        val existingSha = runCatching {
+            val response = app.baseClient.newCall(
+                Request.Builder()
+                    .url("$apiUrl?ref=${gh.branch}")
+                    .header("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+            ).execute()
+            response.use {
+                if (it.isSuccessful) {
+                    parseJson<GitHubContentsResponse>(it.body?.string() ?: "").sha
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+
+        val contentB64 = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val bodyJson = buildString {
+            append("{\"message\":\"backup\",\"content\":\"")
+            append(contentB64)
+            append("\",\"branch\":\"")
+            append(gh.branch.replace("\"", "\\\""))
+            if (existingSha != null) {
+                append("\",\"sha\":\"")
+                append(existingSha)
+            }
+            append("\"}")
+        }
+        val response = app.baseClient.newCall(
+            Request.Builder()
+                .url(apiUrl)
+                .header("Authorization", "Bearer $token")
+                .put(bodyJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+        ).execute()
+        response.use {
+            if (!it.isSuccessful) {
+                throw IOException("HTTP ${it.code} ${it.body?.string()?.take(200)}")
+            }
+        }
+        return "https://raw.githubusercontent.com/${gh.owner}/${gh.repo}/refs/heads/${gh.branch}/${gh.path}"
+    }
+
+    /**
+     * Resolves the given path to a file. If the path points to a directory
+     * (ends with a separator) a timestamped backup file is created in it.
+     */
+    @Throws(IOException::class)
+    private fun backupPathToFile(context: Context, path: String): SafeFile {
+        if (path.endsWith(File.separator) || path.endsWith("/")) {
+            val dir = SafeFile.fromFilePath(context, path)
+                ?: throw IOException("Bad path: $path")
+            val date = SimpleDateFormat("yyyy_MM_dd_HH_mm", Locale.getDefault()).format(Date(currentTimeMillis()))
+            return dir.createFileOrThrow("CS3_Backup_${date}.txt")
+        }
+        return SafeFile.fromFilePath(context, path) ?: throw IOException("Bad path: $path")
+    }
+
     @Throws(IOException::class)
     private fun setupBackupStream(context: Context, name: String, ext: String = "txt"): DownloadObjects.StreamData {
         return setupStream(
@@ -259,15 +483,7 @@ object BackupUtils {
                                 ?: return@ioSafe
 
                             val text = input.bufferedReader().readText()
-                            val restoredValue = parseJson<BackupFile>(text)
-
-                            restore(
-                                activity,
-                                restoredValue,
-                                restoreSettings = true,
-                                restoreDataStore = true,
-                            )
-                            activity.runOnUiThread { activity.recreate() }
+                            activity.restoreFromText(text)
                         } catch (e: Exception) {
                             logError(e)
                             main { // smth can fail in .format
@@ -283,7 +499,65 @@ object BackupUtils {
         }
     }
 
-    fun Activity.restorePrompt() {
+    /** Restores a backup from the given local path or http(s) URL. */
+    fun FragmentActivity.restoreFromPath(path: String) {
+        val activity = this
+        ioSafe {
+            try {
+                val text = fetchPathText(activity, path)
+                activity.restoreFromText(text)
+            } catch (e: Exception) {
+                logError(e)
+                main { // smth can fail in .format
+                    showToast(
+                        getString(R.string.restore_failed_format).format(e.toString())
+                    )
+                }
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun fetchPathText(context: Context, path: String): String = when {
+        path.startsWith("http://") || path.startsWith("https://") -> {
+            val response = app.baseClient.newCall(Request.Builder().url(path).build()).execute()
+            response.use {
+                if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+                it.body?.string() ?: throw IOException("Empty response")
+            }
+        }
+        else -> {
+            val file = SafeFile.fromFilePath(context, path)
+                ?: throw IOException("Bad path: $path")
+            file.openInputStreamOrThrow().bufferedReader().readText()
+        }
+    }
+
+    private fun FragmentActivity.restoreFromText(text: String) {
+        val restoredValue = parseJson<BackupFile>(text)
+
+        restore(
+            this,
+            restoredValue,
+            restoreSettings = true,
+            restoreDataStore = true,
+        )
+        // Set before recreate() so the user still gets told the data was recovered
+        setKey(RESTORE_CONFIRMATION_KEY, true)
+        runOnUiThread { recreate() }
+    }
+
+    /**
+     * Returns true if a restore completed since the last call, clearing the flag so the
+     * confirmation is only ever shown once per restore.
+     */
+    fun consumeRestoreConfirmation(context: Context): Boolean {
+        val restored = context.getKey(RESTORE_CONFIRMATION_KEY, false) == true
+        if (restored) context.removeKey(RESTORE_CONFIRMATION_KEY)
+        return restored
+    }
+
+    fun FragmentActivity.restorePrompt() {
         runOnUiThread {
             try {
                 restoreFileSelector?.launch(

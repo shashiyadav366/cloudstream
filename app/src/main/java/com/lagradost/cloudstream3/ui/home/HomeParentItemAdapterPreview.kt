@@ -17,11 +17,14 @@ import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import androidx.viewpager2.widget.ViewPager2
+import android.widget.Toast
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarItemView
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
+import com.lagradost.cloudstream3.CommonActivity.showToast
+import com.lagradost.cloudstream3.ui.APIRepository.Companion.noneApi
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainActivity
@@ -306,37 +309,49 @@ class HomeParentItemAdapterPreview(
             }
             */
         }
+private val previewViewpager: ViewPager2 =
+    itemView.findViewById(R.id.home_preview_viewpager)
 
-        private val previewViewpager: ViewPager2 =
-            itemView.findViewById(R.id.home_preview_viewpager)
+private val previewViewpagerText: ViewGroup =
+    itemView.findViewById(R.id.home_preview_viewpager_text)
 
-        private val previewViewpagerText: ViewGroup =
-            itemView.findViewById(R.id.home_preview_viewpager_text)
+// private val previewHeader: FrameLayout = itemView.findViewById(R.id.home_preview)
+private val resumeHolder: View =
+    itemView.findViewById(R.id.home_watch_holder)
 
-        // private val previewHeader: FrameLayout = itemView.findViewById(R.id.home_preview)
-        private val resumeHolder: View = itemView.findViewById(R.id.home_watch_holder)
-        private val resumeRecyclerView: RecyclerView =
-            itemView.findViewById(R.id.home_watch_child_recyclerview)
-        private val bookmarkHolder: View = itemView.findViewById(R.id.home_bookmarked_holder)
-        private val bookmarkRecyclerView: RecyclerView =
-            itemView.findViewById(R.id.home_bookmarked_child_recyclerview)
+private val resumeRecyclerView: RecyclerView =
+    itemView.findViewById(R.id.home_watch_child_recyclerview)
 
-        private val headProfilePic: ImageView? = itemView.findViewById(R.id.home_head_profile_pic)
-        private val headProfilePicCard: View? =
-            itemView.findViewById(R.id.home_head_profile_padding)
+private val bookmarkHolder: View =
+    itemView.findViewById(R.id.home_bookmarked_holder)
 
-        private val alternateHeadProfilePic: ImageView? =
-            itemView.findViewById(R.id.alternate_home_head_profile_pic)
-        private val alternateHeadProfilePicCard: View? =
-            itemView.findViewById(R.id.alternate_home_head_profile_padding)
+private val bookmarkRecyclerView: RecyclerView =
+    itemView.findViewById(R.id.home_bookmarked_child_recyclerview)
 
-        private val topPadding: View? = itemView.findViewById(R.id.home_padding)
+private val headProfilePic: ImageView? =
+    itemView.findViewById(R.id.home_head_profile_pic)
 
-        private val alternativeAccountPadding: View? =
-            itemView.findViewById(R.id.alternative_account_padding)
+private val headProfilePicCard: View? =
+    itemView.findViewById(R.id.home_head_profile_padding)
 
-        private val homeNonePadding: View = itemView.findViewById(R.id.home_none_padding)
+private val headReloadProvider: View? =
+    itemView.findViewById(R.id.home_head_reload_provider)
 
+private val alternateHeadProfilePic: ImageView? =
+    itemView.findViewById(R.id.alternate_home_head_profile_pic)
+
+private val alternateHeadProfilePicCard: View? =
+    itemView.findViewById(R.id.alternate_home_head_profile_padding)
+
+private val topPadding: View? =
+    itemView.findViewById(R.id.home_padding)
+
+private val alternativeAccountPadding: View? =
+    itemView.findViewById(R.id.alternative_account_padding)
+
+private val homeNonePadding: View =
+    itemView.findViewById(R.id.home_none_padding)
+        
         fun onSelect(item: LoadResponse, position: Int) {
             (binding as? FragmentHomeHeadTvBinding)?.apply {
                 homePreviewDescription.isGone = item.plot.isNullOrBlank()
@@ -504,8 +519,16 @@ class HomeParentItemAdapterPreview(
 
         private val toggleListHolder: ChipGroup? = itemView.findViewById(R.id.home_type_holder)
 
-        fun bind() = Unit
-
+        fun bind() {
+    headReloadProvider?.setOnClickListener {
+        viewModel.loadAndCancel(
+            viewModel.apiName.value ?: noneApi.name,
+            forceReload = true,
+            fromUI = true
+        )
+        showToast(R.string.action_reload, Toast.LENGTH_SHORT)
+    }
+}
         init {
             previewViewpager.setPageTransformer(HomeScrollTransformer())
 

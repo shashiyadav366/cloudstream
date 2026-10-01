@@ -40,7 +40,6 @@ import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
-import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.UIHelper.getStatusBarHeight
 import com.lagradost.cloudstream3.utils.Vector2
 import kotlin.math.abs
@@ -132,7 +131,9 @@ class PlayerGestureHelper(private val playerView: PlayerView) {
     /** Hold / speed-up */
     val holdHandler = Handler(Looper.getMainLooper())
     var hasTriggeredSpeedUp = false
+    var holdPrevPlaybackSpeed: Float = 1.0f
     val holdRunnable = Runnable {
+        holdPrevPlaybackSpeed = playerView.player.getPlaybackSpeed()
         playerView.player.setPlaybackSpeed(2.0f)
         showOrHideSpeedUp(true)
         playerView.callbacks?.onHoldSpeedUp(true)
@@ -1166,7 +1167,7 @@ class PlayerGestureHelper(private val playerView: PlayerView) {
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
                 holdHandler.removeCallbacks(holdRunnable)
                 if (hasTriggeredSpeedUp) {
-                    playerView.player.setPlaybackSpeed(DataStoreHelper.playBackSpeed)
+                    playerView.player.setPlaybackSpeed(holdPrevPlaybackSpeed)
                     showOrHideSpeedUp(false)
                     playerView.callbacks?.onHoldSpeedUp(false)
                     hasTriggeredSpeedUp = false
@@ -1193,7 +1194,7 @@ class PlayerGestureHelper(private val playerView: PlayerView) {
                             x = currentTouch.x,
                             viewWidth = view.width,
                             isLocked = isLocked,
-                            onSingleTap = { playerView.callbacks?.onSingleTap() }
+                            onSingleTap = { playerView.callbacks?.onSingleTap(currentTouch.x, view.width) }
                         )
                     }
                 }

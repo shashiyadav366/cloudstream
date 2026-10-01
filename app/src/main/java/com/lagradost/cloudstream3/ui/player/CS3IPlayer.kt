@@ -26,6 +26,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -163,6 +164,7 @@ class CS3IPlayer : IPlayer {
 
     private var ignoreSSL: Boolean = true
     private var playBackSpeed: Float = 1.0f
+    override var isLiveStream = false
 
     /**
      * Shared compressor instance — only created when the setting is enabled.
@@ -208,6 +210,7 @@ class CS3IPlayer : IPlayer {
     override fun getDuration(): Long? = exoPlayer?.duration
     override fun getPosition(): Long? = exoPlayer?.currentPosition
     override fun getIsPlaying(): Boolean = isPlaying
+    override fun getVolume(): Float = exoPlayer?.volume ?: 1f
     override fun getPlaybackSpeed(): Float = playBackSpeed
 
     /**
@@ -236,6 +239,10 @@ class CS3IPlayer : IPlayer {
      * */
     @Volatile
     var isPlayerActive: Boolean = false
+
+    /** True once playback hits an unrecoverable error (e.g. ERROR_CODE_IO_BAD_HTTP_STATUS). */
+    @Volatile
+    private var hasFatalPlaybackError: Boolean = false
 
     override fun releaseCallbacks() {
         eventHandler = null
@@ -602,6 +609,7 @@ class CS3IPlayer : IPlayer {
     private fun releasePlayer(saveTime: Boolean = true) {
         Log.i(TAG, "releasePlayer")
         eventLooperIndex += 1
+        hasFatalPlaybackError = false
         if (saveTime)
             updatedTime()
 
@@ -664,8 +672,8 @@ class CS3IPlayer : IPlayer {
     }
 
     override fun setPlaybackSpeed(speed: Float) {
-        exoPlayer?.setPlaybackSpeed(speed)
         playBackSpeed = speed
+        exoPlayer?.setPlaybackSpeed(speed)
     }
 
     companion object {
@@ -1397,19 +1405,51 @@ class CS3IPlayer : IPlayer {
                 source
             }
         }
-        return exoPlayerBuilder.build().apply {
-            setPlayWhenReady(playWhenReady)
-            seekTo(currentWindow, playbackPosition)
-            // Merge video, subtitles and external audio tracks
-            val allSources = listOf(videoMediaSource) + subSources + audioSources
-            setMediaSource(
-                MergingMediaSource(*allSources.toTypedArray()),
-                playbackPosition
+return exoPlayerBuilder.build().apply {
+    setPlayWhenReady(playWhenReady)
+
+    val mediaSource =
+        if (subSources.isNotEmpty() || audioSources.isNotEmpty()) {
+            MergingMediaSource(
+                videoMediaSource,
+                *subSources.toTypedArray(),
+                *audioSources.toTypedArray()
             )
-            setHandleAudioBecomingNoisy(true)
-            setPlaybackSpeed(playBackSpeed)
-            this.addAnalyticsListener(tracksAnalyticsListener)
+        } else {
+            videoMediaSource
         }
+
+    // This preserves watch history for VOD.
+    // For live streams, playbackPosition is already TIME_UNSET,
+    // so ExoPlayer automatically starts at the live edge.
+    setMediaSource(mediaSource, playbackPosition)
+
+    setHandleAudioBecomingNoisy(true)
+    setPlaybackSpeed(playBackSpeed)
+
+    addAnalyticsListener(tracksAnalyticsListener)
+
+    addListener(object : Player.Listener {
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState != Player.STATE_READY) return
+
+            val timeline = currentTimeline
+            if (timeline.isEmpty) return
+
+            val window = Timeline.Window()
+            timeline.getWindow(currentMediaItemIndex, window)
+
+            val wasLive = isLiveStream
+            isLiveStream = window.isLive
+            if (isLiveStream && !wasLive) {
+                this@CS3IPlayer.playBackSpeed = 1.0f
+            }
+            setPlaybackSpeed(this@CS3IPlayer.playBackSpeed)
+            event(PlaybackSpeedChangedEvent(this@CS3IPlayer.getPlaybackSpeed()))
+        }
+    })
+}
     }
 
     private fun loadExo(
@@ -1429,6 +1469,7 @@ class CS3IPlayer : IPlayer {
 
         try {
             hasUsedFirstRender = false
+            isLiveStream = false
 
             val playWhenReady = if (settings.player.startPaused.get()) {
                 false
@@ -1580,46 +1621,49 @@ class CS3IPlayer : IPlayer {
                     }
                 }
 
-                override fun onPlayerError(error: PlaybackException) {
-                    // If the Network fails then ignore the exception if the duration is set.
-                    // This is to switch mirrors automatically if the stream has not been fetched, but
-                    // allow playing the buffer without internet as then the duration is fetched.
-                    when {
-                        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
-                                && exoPlayer?.duration != TIME_UNSET -> {
-                            exoPlayer?.prepare()
-                        }
+               override fun onPlayerError(error: PlaybackException) {
+    when {
+        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+                && exoPlayer?.duration != TIME_UNSET -> {
+            exoPlayer?.prepare()
+        }
 
-                        error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
-                            // Re-initialize player at the current live window default position.
-                            exoPlayer?.seekToDefaultPosition()
-                            exoPlayer?.prepare()
-                        }
+        error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+            exoPlayer?.seekToDefaultPosition()
+            exoPlayer?.prepare()
+        }
 
-                        // PlaylistStuckException usually happens when the player position is ahead of the live window.
-                        // Seek to the default location in that case
-                        error.cause is HlsPlaylistTracker.PlaylistStuckException -> {
-                            val position = exoPlayer?.currentPosition ?: exoPlayer?.duration ?: 0
+        error.cause is HlsPlaylistTracker.PlaylistStuckException -> {
+            val position = exoPlayer?.currentPosition ?: exoPlayer?.duration ?: 0
+            val aheadOfLive =
+                LiveHelper.getLiveManager(exoPlayer)
+                    ?.getTimeAheadOfLive(position) ?: 0
 
-                            // Seek to live head
-                            val aheadOfLive = LiveHelper.getLiveManager(exoPlayer)?.getTimeAheadOfLive(position) ?: 0
+            if (aheadOfLive > 100) {
+                exoPlayer?.seekTo(position - aheadOfLive)
+            } else {
+                exoPlayer?.seekToDefaultPosition()
+            }
 
-                            if (aheadOfLive > 100) {
-                                exoPlayer?.seekTo(position - aheadOfLive)
-                            } else {
-                                exoPlayer?.seekToDefaultPosition()
-                            }
-                            exoPlayer?.prepare()
-                        }
+            exoPlayer?.prepare()
+        }
 
+        else -> {
+    // Broken / non-playable video.
+    hasFatalPlaybackError = true
+    PlayerPipHelper.updatePIPModeActions(
+        activity = activity,
+        status = CSPlayerLoading.IsPaused,
+        pipEnabled = false,
+        aspectRatio = null
+    )
 
-                        else -> {
-                            event(ErrorEvent(error))
-                        }
-                    }
+    event(ErrorEvent(error))
+}
+    }
 
-                    super.onPlayerError(error)
-                }
+    super.onPlayerError(error)
+               }
 
                 //override fun onCues(cues: MutableList<Cue>) {
                 //    super.onCues(cues.map { cue -> cue.buildUpon().setText("Hello world").setSize(Cue.DIMEN_UNSET).build() })
@@ -1813,6 +1857,8 @@ class CS3IPlayer : IPlayer {
     override fun isActive(): Boolean {
         return exoPlayer != null
     }
+
+    override fun hasFatalError(): Boolean = hasFatalPlaybackError
 
     @MainThread
     private fun loadTorrent(context: Context, link: ExtractorLink) {

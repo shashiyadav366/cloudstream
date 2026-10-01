@@ -151,6 +151,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (signingConfigs.names.contains("prerelease")) {
+                signingConfig = signingConfigs.getByName("prerelease")
+            }
         }
         debug {
             isDebuggable = true
@@ -159,6 +162,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (signingConfigs.names.contains("prerelease")) {
+                signingConfig = signingConfigs.getByName("prerelease")
+            }
         }
     }
 

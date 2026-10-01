@@ -1,9 +1,11 @@
 package com.lagradost.cloudstream3.ui.settings
 
+import android.content.Context
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lagradost.cloudstream3.mvvm.safe
+import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream4.AppSettings
 import com.lagradost.cloudstream4.state.ActionHandler
@@ -50,7 +52,7 @@ sealed class GithubAction {
     data class SkipUpdate(val file: GithubReleases.GithubFile) : GithubAction()
 }
 
-const val APK_USERNAME = "recloudstream"
+const val APK_USERNAME = "shashiyadav366"
 const val APK_REPOSITORY = "cloudstream"
 const val APK_PRERELEASE = "pre-release"
 const val APK_CONTENT_TYPE = "application/vnd.android.package-archive"
@@ -132,9 +134,17 @@ class GithubViewModel(
     val buildSha: String,
     val settings: AppSettings,
     val updater: AppUpdater,
+    /** Used to read the optional GitHub token, required for private repositories */
+    private val appContext: Context? = null,
 ) : ViewModel(), StateContainer<GithubState> by DefaultStateContainer(GithubState()),
     ActionHandler<GithubAction> {
     private val updateDispatcher = SingleActiveQuery(Dispatchers.IO)
+
+    /** The exact same GitHub token as used by the backup section, single source of truth */
+    private fun getGithubToken(): String? {
+        val context = appContext ?: return null
+        return BackupUtils.getBackupToken(context)
+    }
 
     override fun onAction(action: GithubAction) {
         when (action) {
@@ -286,7 +296,8 @@ class GithubViewModel(
             userName = remoteUserName,
             repository = remoteRepository,
             prereleaseTag = remotePrereleaseTag,
-            contentType = remoteContentType
+            contentType = remoteContentType,
+            token = getGithubToken()
         ) ?: throw FileNotFoundException()
 
     @Throws
@@ -295,5 +306,6 @@ class GithubViewModel(
             tag = tag,
             userName = remoteUserName,
             repository = remoteRepository,
+            token = getGithubToken()
         )
 }

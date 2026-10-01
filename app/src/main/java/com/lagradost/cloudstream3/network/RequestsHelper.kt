@@ -1,6 +1,7 @@
 package com.lagradost.cloudstream3.network
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.Prerelease
 import com.lagradost.cloudstream3.R
@@ -63,6 +64,13 @@ fun buildDefaultClient(context: Context, ignoreSSL: Boolean = false): OkHttpClie
                 6 -> addQuad9Dns()
                 7 -> addDnsSbDns()
                 8 -> addCanadianShieldDns()
+                9 -> addAdGuardDnsTls()
+                10 -> addGoogleDnsTls()
+                11 -> addCloudFlareDnsTls()
+                12 -> addQuad9DnsTls()
+                13 -> addDnsSbDnsTls()
+                14 -> addDNSWatchDnsTls()
+                15 -> addCanadianShieldDnsTls()
             }
         }
         // Needs to be build as otherwise the other builders will change this object

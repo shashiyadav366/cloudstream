@@ -37,15 +37,43 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 
+/**
+ * Builds the headers used to talk to the GitHub API. If the user has set a
+ * GitHub token (Settings -> Updates) it is sent as a Bearer token so that
+ * private repositories work too.
+ */
+internal fun githubApiHeaders(context: Context): Map<String, String> =
+    githubHeaders(context, "application/vnd.github.v3+json")
+
+/**
+ * Headers used when downloading release assets. The GitHub asset endpoint
+ * requires "application/octet-stream" to return the file instead of JSON.
+ */
+internal fun githubDownloadHeaders(context: Context): Map<String, String> =
+    githubHeaders(context, "application/octet-stream")
+
+private fun githubHeaders(context: Context, accept: String): Map<String, String> {
+    val token = PreferenceManager.getDefaultSharedPreferences(context)
+        .getString(context.getString(R.string.github_token_key), null)
+        ?.takeIf { it.isNotBlank() }
+    val headers = mutableMapOf("Accept" to accept)
+    if (token != null) headers["Authorization"] = "Bearer $token"
+    return headers
+}
+
 object InAppUpdater {
-    private const val GITHUB_USER_NAME = "recloudstream"
+    private const val GITHUB_USER_NAME = "shashiyadav366"
     private const val GITHUB_REPO = "cloudstream"
 
     private const val PRERELEASE_PACKAGE_NAME = "com.lagradost.cloudstream3.prerelease"
     private const val LOG_TAG = "InAppUpdater"
 
+    private fun assetDownloadUrl(asset: GithubAsset) =
+        "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases/assets/${asset.id}"
+
     @Serializable
     private data class GithubAsset(
+        @JsonProperty("id") @SerialName("id") val id: Long,
         @JsonProperty("name") @SerialName("name") val name: String,
         @JsonProperty("size") @SerialName("size") val size: Int, // Size in bytes
         @JsonProperty("browser_download_url") @SerialName("browser_download_url") val browserDownloadUrl: String,
@@ -97,56 +125,59 @@ object InAppUpdater {
         }
     }
 
+    private fun String?.toVersionNumber(): Int? {
+        return this?.let {
+            Regex("""(\d+)\.(\d+)\.(\d+)""").find(it)?.groupValues?.let { g ->
+                g[1].toInt() * 100_000_000 + g[2].toInt() * 10_000 + g[3].toInt()
+            }
+        }
+    }
+
     private suspend fun Activity.getReleaseUpdate(): Update {
         val url = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
+        val headers = githubApiHeaders(this)
         val response = parseJson<Array<GithubRelease>>(
             app.get(url, headers = headers).text
         ).toList()
 
-        val versionRegex = Regex("""(.*?((\d+)\.(\d+)\.(\d+))\.apk)""")
-        val versionRegexLocal = Regex("""(.*?((\d+)\.(\d+)\.(\d+)).*)""")
-        val foundList = response.filter { rel ->
+        // Detect the newest non-prerelease release whose APK asset or tag name
+        // contains a version like X.Y.Z (e.g. "4.9.0.apk" or tag "v4.9.0")
+        val found = response.filter { rel ->
             !rel.prerelease
-        }.sortedWith(compareBy { release ->
-            release.assets.firstOrNull { it.contentType == "application/vnd.android.package-archive" }?.name?.let { it1 ->
-                versionRegex.find(it1)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                }
+        }.mapNotNull { rel ->
+            val apkAssets = rel.assets.filter {
+                it.contentType == "application/vnd.android.package-archive"
             }
-        }).toList()
+            val versionAsset = apkAssets.firstOrNull { it.name.toVersionNumber() != null }
+            val versionNumber =
+                (versionAsset?.name ?: rel.tagName).toVersionNumber() ?: return@mapNotNull null
+            Triple(versionNumber, rel, versionAsset ?: apkAssets.firstOrNull())
+        }.maxByOrNull { it.first }
 
-        val found = foundList.lastOrNull()
-        val foundAsset = found?.assets?.getOrNull(0)
-        val foundVersion = foundAsset?.name?.let { versionRegex.find(it) }
-
-        if (foundVersion == null) {
-            return Update(false, null, null, null, null)
-        }
+        val rel = found?.second ?: return Update(false, null, null, null, null)
+        val apkAsset = found.third ?: return Update(false, null, null, null, null)
+        val foundVersion = (apkAsset.name ?: rel.tagName)
 
         val currentVersion = packageName?.let {
             packageManager.getPackageInfo(it, 0)
         }
 
-        val shouldUpdate = if (foundAsset.browserDownloadUrl.isBlank()) {
+        val shouldUpdate = if (apkAsset.browserDownloadUrl.isBlank()) {
             false
         } else {
-            currentVersion?.versionName?.let { versionName ->
-                versionRegexLocal.find(versionName)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                }
-            }?.compareTo(
-                foundVersion.groupValues.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                })!! < 0
+            val currentVersionNumber =
+                currentVersion?.versionName?.toVersionNumber() ?: return Update(false, null, null, null, null)
+            val foundVersionNumber =
+                foundVersion.toVersionNumber() ?: return Update(false, null, null, null, null)
+            currentVersionNumber < foundVersionNumber
         }
 
         return Update(
             shouldUpdate,
-            foundAsset.browserDownloadUrl,
-            foundVersion.groupValues[2],
-            found.body,
-            found.nodeId
+            assetDownloadUrl(apkAsset),
+            foundVersion,
+            rel.body,
+            rel.nodeId
         )
     }
 
@@ -154,18 +185,23 @@ object InAppUpdater {
         val tagUrl =
             "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/git/ref/tags/pre-release"
         val releaseUrl = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
+        val headers = githubApiHeaders(this)
         val response = parseJson<Array<GithubRelease>>(
             app.get(releaseUrl, headers = headers).text
         ).toList()
 
-        val found = response.lastOrNull { rel ->
+        val found = response.firstOrNull { rel ->
             rel.prerelease || rel.tagName == "pre-release"
-        }
+        } ?: return Update(false, null, null, null, null)
 
-        val foundAsset = found?.assets?.filter { it ->
+        // Prefer the dedicated prerelease build so the prerelease flavor
+        // always downloads its own APK instead of the stable one
+        val foundAsset = found.assets.filter { it ->
             it.contentType == "application/vnd.android.package-archive"
-        }?.getOrNull(0)
+        }.firstOrNull { it.name == "app-prerelease-release.apk" }
+            ?: found.assets.firstOrNull {
+                it.contentType == "application/vnd.android.package-archive"
+            }
 
         if (foundAsset == null) {
             return Update(false, null, null, null, null)
@@ -177,7 +213,7 @@ object InAppUpdater {
 
         return Update(
             currentCommitHash() != updateCommitHash,
-            foundAsset.browserDownloadUrl,
+            assetDownloadUrl(foundAsset),
             updateCommitHash,
             found.body,
             found.nodeId
@@ -201,7 +237,16 @@ object InAppUpdater {
             val sink: BufferedSink = downloadedFile.sink().buffer()
 
             updateLock.withLock {
-                sink.writeAll(app.get(url).body.source())
+                val response = app.get(url, headers = githubDownloadHeaders(this))
+                val badContentType = response.headers["Content-Type"]?.let {
+                    it.contains("html") || it.contains("json") || it.contains("text")
+                } == true
+                if (!response.isSuccessful || badContentType) {
+                    Log.d(LOG_TAG, "Update download failed (${response.code}) from $url")
+                    sink.close()
+                    return false
+                }
+                sink.writeAll(response.body.source())
                 sink.close()
                 openApk(this, Uri.fromFile(downloadedFile))
             }

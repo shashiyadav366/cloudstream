@@ -178,11 +178,22 @@
     <string name="restore_settings">Restore data from backup</string>
     <string name="backup_settings">Back up data</string>
     <string name="backup_frequency">Backup frequency</string>
-    <string name="restore_success">Loaded backup file</string>
+    <string name="restore_success">Data recovered from backup</string>
     <string name="restore_failed_format" formatted="true">Failed to restore data from file %s</string>
     <string name="backup_success">Data stored</string>
     <string name="backup_failed">Storage permissions missing. Please try again.</string>
     <string name="backup_failed_error_format">Error backing up %s</string>
+    <string name="backup_destination_title">Backup destination</string>
+    <string name="backup_destination_choose_title">Choose backup destination</string>
+    <string name="backup_destination_local">Local</string>
+    <string name="backup_destination_path_url">Path/URL</string>
+    <string name="backup_path_or_url_title">Backup path or URL</string>
+    <string name="backup_path_empty">Path cannot be empty</string>
+    <string name="backup_uploaded_format" formatted="true">Backup uploaded to %1$s</string>
+    <string name="backup_saved_to_format" formatted="true">Backup saved to %1$s</string>
+    <string name="github_token_title">GitHub token</string>
+    <string name="github_token_summary">Token used to upload backups to GitHub and to check for app updates on private repositories</string>
+    <string name="github_token_empty">Token cannot be empty</string>
     <string name="search">Search</string>
     <string name="library">Library</string>
     <string name="category_account">Accounts and Security</string>
@@ -239,6 +250,10 @@
     <string name="delete_files">Delete Files</string>
     <string name="delete_format" formatted="true">Delete (%1$d | %2$s)</string>
     <string name="cancel">Cancel</string>
+    <string name="blocked_links_title">Blocked External Links</string>
+    <string name="blocked_links_summary">Block up to 5 external URLs/domains from opening in the browser.</string>
+    <string name="blocked_links_dialog_hint">Enter one URL or domain per line. A maximum of 5 entries is saved, and matching includes subdomains.</string>
+    <string name="blocked_links_too_many">Only the first 5 entries are saved.</string>
     <string name="pause">Pause</string>
     <string name="start">Start</string>
     <string name="test_failed">Failed</string>
@@ -325,6 +340,7 @@
     <string name="no_update_found">No Update Found</string>
     <string name="check_for_update">Check for Update</string>
     <string name="video_lock">Lock</string>
+    <string name="mute">Mute</string>
     <string name="video_aspect_ratio_resize">Resize</string>
     <string name="video_source">Source</string>
     <string name="video_skip_op">Skip OP</string>
@@ -345,7 +361,7 @@
     <string name="android_tv_interface_off_seek_settings_summary">The seek amount used when the player is hidden</string>
     <string name="video_ram_description">Causes crashes if set too high on devices with low memory, such as Android TV.</string>
     <string name="video_disk_description">Causes problems if set too high on devices with low storage space, such as Android TV.</string>
-    <string name="dns_pref">DNS over HTTPS</string>
+    <string name="dns_pref">DNS over HTTPS/TLS</string>
     <string name="dns_pref_summary">Useful for bypassing ISP blocks</string>
     <string name="jsdelivr_proxy">GitHub Proxy</string>
     <string name="jsdelivr_enabled">Could not reach GitHub. Turning on jsDelivr proxy…</string>
@@ -517,6 +533,10 @@
     <string name="no_plugins_found_error">No plugins found in repository</string>
     <string name="no_repository_found_error">Repository not found, check the URL and try VPN</string>
     <string name="batch_download">Batch download</string>
+    <string name="batch_delete">Batch delete</string>
+    <string name="batch_delete_start_format" formatted="true">Started deleting %1$d %2$s…</string>
+    <string name="batch_delete_finish_format" formatted="true">Deleted %1$d %2$s</string>
+    <string name="batch_delete_nothing_to_delete_format" formatted="true">All %s already removed</string>
     <string name="plugin_singular">plugin</string>
     <string name="plugin">plugins</string>
     <string name="delete_repository_plugins">This will also delete all repository plugins</string>

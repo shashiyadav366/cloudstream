@@ -7,6 +7,7 @@ import android.app.Dialog
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import android.content.Context
 import android.content.DialogInterface
+import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -42,6 +43,8 @@ import com.google.android.material.button.MaterialButton
 import com.lagradost.cloudstream3.CommonActivity.keyEventListener
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.ui.player.PlayerPipHelper.enterPip
+import com.lagradost.cloudstream3.ui.player.PlayerPipHelper.isPIPPossible
 import com.lagradost.cloudstream3.databinding.FragmentPlayerBinding
 import com.lagradost.cloudstream3.databinding.PlayerCustomLayoutBinding
 import com.lagradost.cloudstream3.databinding.SpeedDialogBinding
@@ -84,6 +87,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     protected var isLocked = false
     protected var timestampShowState = false
     private var metadataVisibilityToken = 0
+    private var settingsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     protected var hasEpisodes = false
         private set
 
@@ -115,7 +119,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         }
 
     private var isShowingEpisodeOverlay: Boolean = false
-    private var previousPlayStatus: Boolean = false
+    private var isShowingTracksOverlay: Boolean = false
 
     override fun fixLayout(view: View) = Unit
 
@@ -150,6 +154,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 autoHide()
             }
         }
+    protected var selectSpeedDialogBinding: SpeedDialogBinding? = null
     protected var selectSubtitlesDialog: Dialog? = null
         set(value) {
             val prevField = field
@@ -176,18 +181,27 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 || selectSubtitlesDialog?.isShowing == true
                 || selectCompressorDialog?.isShowing == true
                 || isShowingEpisodeOverlay
+                || isShowingTracksOverlay
+
+    /** Closes every full-screen player dialog so only one control is active at a time. */
+    protected fun closePlayerDialogs() {
+        selectSourceDialog?.dismissSafe(activity)
+        selectSourceDialog = null
+        selectTrackDialog?.dismissSafe(activity)
+        selectTrackDialog = null
+        selectSpeedDialog?.dismissSafe(activity)
+        selectSpeedDialog = null
+        selectSubtitlesDialog?.dismissSafe(activity)
+        selectSubtitlesDialog = null
+    }
 
     private fun scheduleMetadataVisibility() {
         val metadataScrim = playerBinding?.playerMetadataScrim ?: return
         val ctx = metadataScrim.context ?: return
 
-        if (!ctx.shouldShowPlayerMetadata()) {
-            metadataScrim.isVisible = false
-            metadataVisibilityToken++
-            return
-        }
+        val isInPip = activity?.isInPictureInPictureMode == true
 
-        if (isLayout(PHONE)) {
+        if (!ctx.shouldShowPlayerMetadata() || isInPip) {
             metadataScrim.isVisible = false
             metadataVisibilityToken++
             return
@@ -232,9 +246,67 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     }
 
     override fun onDestroyView() {
+        settingsListener?.let { listener ->
+            context?.let { ctx ->
+                PreferenceManager.getDefaultSharedPreferences(ctx)
+                    .unregisterOnSharedPreferenceChangeListener(listener)
+            }
+        }
+        settingsListener = null
         playerHostView?.releaseOverlayLayoutListener()
         playerBinding = null
         super.onDestroyView()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        metadataVisibilityToken++
+        if (isInPictureInPictureMode) {
+            playerBinding?.playerMetadataScrim?.isVisible = false
+        } else {
+            scheduleMetadataVisibility()
+        }
+    }
+
+    /**
+     * Re-reads player button preferences and updates visibility instantly.
+     * Called on init and whenever a relevant SharedPreferences key changes.
+     */
+    private fun refreshPlayerSettings() {
+        val ctx = context ?: return
+        try {
+            val settingsManager = PreferenceManager.getDefaultSharedPreferences(ctx)
+            playBackSpeedEnabled = settingsManager.getBoolean(
+                ctx.getString(R.string.playback_speed_enabled_key), false
+            )
+            playerRotateEnabled = settingsManager.getBoolean(
+                ctx.getString(R.string.rotate_video_key), false
+            )
+            playerResizeEnabled = settingsManager.getBoolean(
+                ctx.getString(R.string.player_resize_enabled_key), true
+            )
+            hideControlsNames = settingsManager.getBoolean(
+                ctx.getString(R.string.hide_player_control_names_key), false
+            )
+            playBackCompressorEnabled = settingsManager.getBoolean(
+                ctx.getString(R.string.compressor_enabled_key), false
+            )
+            playerBinding?.apply {
+                playerSpeedBtt.isVisible = playBackSpeedEnabled
+                playerCompressorBtt.isVisible = playBackCompressorEnabled
+                if (playBackCompressorEnabled) {
+                    restoreCompressorSettings()
+                }
+                playerResizeBtt.isVisible = playerResizeEnabled
+                playerRotateBtt.isVisible =
+                    if (isLayout(TV or EMULATOR)) false else playerRotateEnabled
+                if (hideControlsNames) {
+                    hideControlsNames()
+                }
+            }
+        } catch (e: Exception) {
+            logError(e)
+        }
     }
 
     open fun showMirrorsDialogue() {
@@ -242,6 +314,10 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     }
 
     open fun showTracksDialogue() {
+        throw NotImplementedError()
+    }
+
+    open fun showTracksOverlay() {
         throw NotImplementedError()
     }
 
@@ -307,7 +383,8 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             if (isShowing) {
                 updateUIVisibility()
             } else {
-                toggleEpisodesOverlay(false)
+                if (!isShowingEpisodeOverlay) toggleEpisodesOverlay(false)
+                if (!isShowingTracksOverlay) toggleTracksOverlay(false)
                 playerHolder.postDelayed({ updateUIVisibility() }, 200)
             }
 
@@ -462,17 +539,36 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         playerHostView?.verifyVolume()
         activity?.attachBackPressedCallback("FullScreenPlayer") {
             if (isShowingEpisodeOverlay) {
-                // isShowingEpisodeOverlay pauses, so this makes it easier to unpause
                 if (isLayout(TV or EMULATOR)) {
                     playerPausePlay?.requestFocus()
                 }
                 toggleEpisodesOverlay(show = false)
                 return@attachBackPressedCallback
+            } else if (isShowingTracksOverlay) {
+                if (isLayout(TV or EMULATOR)) {
+                    playerPausePlay?.requestFocus()
+                }
+                toggleTracksOverlay(show = false)
+                return@attachBackPressedCallback
             } else if (isShowing && isLayout(TV or EMULATOR)) {
                 // netflix capture back and hide ~monke
                 onClickChange()
             } else {
-                activity?.popCurrentPage("FullScreenPlayer")
+                // On phones/tablets, pressing back from the full-screen player should drop
+                // the video into native PiP instead of closing it, provided a player is
+                // actually loaded, still playable, and PiP is available (user setting + OS
+                // support). Relying on the global isPipDesired flag is unreliable because it
+                // tracks the auto-enter (Home) flow and can be false after a PiP round-trip,
+                // which would incorrectly close the player. isPIPPossible() covers the same
+                // checks, so use it directly here.
+                if (player.isActive() &&
+                    !player.hasFatalError() &&
+                    activity?.isPIPPossible() == true
+                ) {
+                    activity?.let { enterPip(it) }
+                } else {
+                    activity?.popCurrentPage("FullScreenPlayer")
+                }
             }
         }
         playerHostView?.requestUpdateBrightnessOverlayOnNextLayout()
@@ -491,16 +587,31 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     private fun setPlayBackSpeed(speed: Float) {
         try {
-            DataStoreHelper.playBackSpeed = speed
-            playerBinding?.playerSpeedBtt?.text =
-                getString(R.string.player_speed_text_format).format(speed)
-                    .replace(".0x", "x")
+            // Live stream speeds are session-only and never remembered.
+            if (!player.isLiveStream) {
+                DataStoreHelper.playBackSpeed = speed
+            }
         } catch (e: Exception) {
-            // the format string was wrong
             logError(e)
         }
 
         player.setPlaybackSpeed(speed)
+        updatePlaybackSpeedIndicator()
+    }
+
+    private fun updatePlaybackSpeedIndicator() {
+        val speed = player.getPlaybackSpeed()
+        val text = try {
+            getString(R.string.player_speed_text_format).format(speed)
+                .replace(".0x", "x")
+        } catch (e: Exception) {
+            // the format string was wrong
+            logError(e)
+            ""
+        }
+
+        playerBinding?.playerSpeedBtt?.text = text
+        selectSpeedDialogBinding?.let { updateSpeedDialogBinding(it) }
     }
 
     private fun skipOp() {
@@ -645,8 +756,6 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     private fun showSpeedDialog() {
         val act = activity ?: return
-        val isPlaying = player.getIsPlaying()
-        player.handleEvent(CSPlayerEvent.Pause, PlayerEventSource.UI)
 
         val binding: SpeedDialogBinding = SpeedDialogBinding.inflate(
             LayoutInflater.from(act)
@@ -685,10 +794,8 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
         val dismiss = DialogInterface.OnDismissListener {
             activity?.hideSystemUI()
-            if (isPlaying) {
-                player.handleEvent(CSPlayerEvent.Play, PlayerEventSource.UI)
-            }
             selectSpeedDialog = null
+            selectSpeedDialogBinding = null
         }
 
         // if (isLayout(PHONE)) {
@@ -704,6 +811,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         builder.setOnDismissListener(dismiss)
         val dialog = builder.create()
         this.selectSpeedDialog = dialog
+        this.selectSpeedDialogBinding = binding
         dialog.show()
         //}
     }
@@ -1079,11 +1187,11 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     }
 
     override fun onAutoHideUI() {
-        if (player.getIsPlaying()) onClickChange()
+        if (player.getIsPlaying() && !isShowingEpisodeOverlay && !isShowingTracksOverlay) onClickChange()
     }
 
     protected fun hidePlayerUI() {
-        if (isShowing) {
+        if (isShowing && !isShowingEpisodeOverlay && !isShowingTracksOverlay) {
             isShowing = false
             animateLayoutChanges()
         }
@@ -1093,12 +1201,20 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     override fun isUIShowing(): Boolean = isShowing
 
-    override fun onSingleTap() {
+    override fun onSingleTap(x: Float, viewWidth: Int) {
+        if (!isShowing && currentPlayerStatus == CSPlayerLoading.IsPaused) {
+            val centerThreshold = 0.25f * viewWidth
+            if (x > viewWidth / 2f - centerThreshold && x < viewWidth / 2f + centerThreshold) {
+                player.handleEvent(CSPlayerEvent.PlayPauseToggle)
+                return
+            }
+        }
         onClickChange()
     }
 
     override fun onTouchDown() {
         if (isShowingEpisodeOverlay) toggleEpisodesOverlay(show = false)
+        if (isShowingTracksOverlay) toggleTracksOverlay(show = false)
     }
 
     @SuppressLint("SetTextI18n")
@@ -1124,6 +1240,10 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     override fun playerStatusChanged() {
         super.playerStatusChanged()
         scheduleMetadataVisibility()
+    }
+
+    override fun onPlaybackSpeedChanged() {
+        updatePlaybackSpeedIndicator()
     }
 
     // When the hold-speedup gesture fires, hide controls so the video is unobstructed.
@@ -1190,6 +1310,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
             KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_VOLUME_MUTE -> {
                 player.handleEvent(CSPlayerEvent.ToggleMute)
+                updateMuteButton()
             }
 
             KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_NUMPAD_9, KeyEvent.KEYCODE_9 -> {
@@ -1244,14 +1365,14 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
             KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_DPAD_UP -> {
-                if (isShowing || isShowingEpisodeOverlay) {
+                if (isShowing || isShowingEpisodeOverlay || isShowingTracksOverlay) {
                     return null
                 }
                 onClickChange()
             }
 
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (!isShowing && !isLocked && !isShowingEpisodeOverlay) {
+                if (!isShowing && !isLocked && !isShowingEpisodeOverlay && !isShowingTracksOverlay) {
                     player.seekTime(-androidTVInterfaceOffSeekTime)
                     return true
                 } else if (playerBinding?.playerPausePlay?.isFocused == true) {
@@ -1263,7 +1384,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             }
 
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                if (!isShowing && !isLocked && !isShowingEpisodeOverlay) {
+                if (!isShowing && !isLocked && !isShowingEpisodeOverlay && !isShowingTracksOverlay) {
                     player.seekTime(androidTVInterfaceOffSeekTime)
                 } else if (playerBinding?.playerPausePlay?.isFocused == true) {
                     player.seekTime(androidTVInterfaceOnSeekTime)
@@ -1286,6 +1407,38 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                     return null
                 }
                 toggleEpisodesOverlay(true)
+            }
+
+            // Remote BACK on TVs/emulators: close the episode overlay, hide the controls,
+            // otherwise close the player. Only the ACTION_DOWN event performs the action;
+            // the matching ACTION_UP is consumed in [handleKeyEvent] so it cannot fire twice.
+            KeyEvent.KEYCODE_BACK -> {
+                if (!isLayout(TV or EMULATOR)) return null
+                when {
+                    isShowingEpisodeOverlay -> {
+                        if (isLayout(TV or EMULATOR)) {
+                            playerPausePlay?.requestFocus()
+                        }
+                        toggleEpisodesOverlay(show = false)
+                    }
+
+                    isShowingTracksOverlay -> {
+                        if (isLayout(TV or EMULATOR)) {
+                            playerPausePlay?.requestFocus()
+                        }
+                        toggleTracksOverlay(show = false)
+                    }
+
+                    isShowing -> {
+                        onClickChange()
+                    }
+
+                    else -> {
+                        // On TVs/emulators PiP does not apply, so just leave the player.
+                        activity?.popCurrentPage("FullScreenPlayer")
+                    }
+                }
+                true
             }
 
             else -> return null // Avoid capturing all input
@@ -1323,14 +1476,11 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 }
             }
 
-            // netflix capture back and hide ~monke
-            // This is removed due to inconsistent behavior on A36 vs A22, see https://github.com/recloudstream/cloudstream/issues/1804
-            /*KeyEvent.KEYCODE_BACK -> {
-                if (isShowing && isLayout(TV or EMULATOR)) {
-                    onClickChange()
-                    return true
-                }
-            }*/
+            // The player handles the remote BACK action on ACTION_DOWN (see handleKeyDownEvent).
+            // This consumes the matching ACTION_UP so the key press does not get handled twice.
+            KeyEvent.KEYCODE_BACK -> {
+                if (isLayout(TV or EMULATOR)) return true
+            }
         }
 
         return false
@@ -1358,6 +1508,21 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         animateLayoutChanges()
         playerHostView?.gestureHelper?.resetFastForwardText()
         playerHostView?.gestureHelper?.resetRewindText()
+    }
+
+    /** Keeps the mute button icon in sync with the current player volume. */
+    private fun updateMuteButton() {
+        val button = playerBinding?.playerMuteBtt ?: return
+        val isMuted = player.getVolume() <= 0f
+        button.setIconResource(
+            if (isMuted) R.drawable.ic_baseline_volume_off_24
+            else R.drawable.ic_baseline_volume_up_24
+        )
+    }
+
+    override fun playerUpdated(player: Any?) {
+        super.playerUpdated(player)
+        updateMuteButton()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1408,28 +1573,6 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                     )
                         .toLong() * 1000L
 
-                playBackSpeedEnabled = settingsManager.getBoolean(
-                    ctx.getString(R.string.playback_speed_enabled_key),
-                    false
-                )
-                playBackCompressorEnabled = settingsManager.getBoolean(
-                    ctx.getString(R.string.compressor_enabled_key),
-                    false
-                )
-                playerRotateEnabled = settingsManager.getBoolean(
-                    ctx.getString(R.string.rotate_video_key),
-                    false
-                )
-                playerResizeEnabled =
-                    settingsManager.getBoolean(
-                        ctx.getString(R.string.player_resize_enabled_key),
-                        true
-                    )
-                hideControlsNames = settingsManager.getBoolean(
-                    ctx.getString(R.string.hide_player_control_names_key),
-                    false
-                )
-
                 val profiles = QualityDataHelper.getProfiles()
                 val type = if (ctx.isUsingMobileData())
                     QualityDataHelper.QualityProfileType.Data
@@ -1439,20 +1582,22 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                     profiles.firstOrNull { it.types.contains(type) }?.id
                         ?: profiles.firstOrNull()?.id
                                 ?: currentQualityProfile
-            }
-            playerBinding?.apply {
-                playerSpeedBtt.isVisible = playBackSpeedEnabled
-                playerCompressorBtt.isVisible = playBackCompressorEnabled
-                if (playBackCompressorEnabled) {
-                    restoreCompressorSettings()
+                settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+                    val ctx2 = context ?: return@OnSharedPreferenceChangeListener
+                    val res = ctx2.resources
+                    when (key) {
+                        res.getString(R.string.playback_speed_enabled_key),
+                        res.getString(R.string.compressor_enabled_key),
+                        res.getString(R.string.rotate_video_key),
+                        res.getString(R.string.player_resize_enabled_key),
+                        res.getString(R.string.hide_player_control_names_key) -> {
+                            refreshPlayerSettings()
+                        }
+                    }
                 }
-                playerResizeBtt.isVisible = playerResizeEnabled
-                playerRotateBtt.isVisible =
-                    if (isLayout(TV or EMULATOR)) false else playerRotateEnabled
-                if (hideControlsNames) {
-                    hideControlsNames()
-                }
+                settingsManager.registerOnSharedPreferenceChangeListener(settingsListener)
             }
+            refreshPlayerSettings()
         } catch (e: Exception) {
             logError(e)
         }
@@ -1537,6 +1682,13 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 toggleLock()
             }
 
+            playerMuteBtt.setOnClickListener {
+                autoHide()
+                player.handleEvent(CSPlayerEvent.ToggleMute)
+                updateMuteButton()
+            }
+            
+
             playerSubtitleOffsetBtt.setOnClickListener {
                 showSubtitleOffsetDialog()
             }
@@ -1620,17 +1772,19 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         updateOrientation()
     }
 
-    private fun toggleEpisodesOverlay(show: Boolean) {
+    protected fun toggleEpisodesOverlay(show: Boolean) {
         if (show && !isShowingEpisodeOverlay) {
-            previousPlayStatus = player.getIsPlaying()
-            player.handleEvent(CSPlayerEvent.Pause)
-            showEpisodesOverlay()
+            // Only one control at a time: the newest one wins.
+            if (isShowingTracksOverlay) toggleTracksOverlay(false)
+            closePlayerDialogs()
             isShowingEpisodeOverlay = true
+            playerHostView?.cancelAutoHide()
+            showEpisodesOverlay()
             animateEpisodesOverlay(true)
         } else if (isShowingEpisodeOverlay) {
-            if (previousPlayStatus) player.handleEvent(CSPlayerEvent.Play)
             isShowingEpisodeOverlay = false
             animateEpisodesOverlay(false)
+            if (player.getIsPlaying() && isShowing) autoHide()
         }
     }
 
@@ -1651,6 +1805,52 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                 .setInterpolator(AccelerateDecelerateInterpolator()).withEndAction {
                     if (!show) {
                         playerBinding?.playerEpisodeOverlay?.isGone = true
+                    }
+                }
+                .start()
+        }
+    }
+
+    protected fun toggleTracksOverlay(show: Boolean) {
+        if (show && !isShowingTracksOverlay) {
+            // Only one control at a time: the newest one wins.
+            if (isShowingEpisodeOverlay) toggleEpisodesOverlay(false)
+            closePlayerDialogs()
+            isShowingTracksOverlay = true
+            playerHostView?.cancelAutoHide()
+            showTracksOverlay()
+            animateTracksOverlay(true)
+            if (isLayout(TV or EMULATOR)) {
+                playerBinding?.playerTracksOverlay?.post {
+                    playerBinding?.playerTracksOverlayContent
+                        ?.findViewById<android.widget.ListView>(R.id.video_tracks_list)
+                        ?.requestFocus()
+                }
+            }
+        } else if (!show && isShowingTracksOverlay) {
+            isShowingTracksOverlay = false
+            animateTracksOverlay(false)
+            if (player.getIsPlaying() && isShowing) autoHide()
+        }
+    }
+
+    private fun animateTracksOverlay(show: Boolean) {
+        playerBinding?.playerTracksOverlay?.let { overlay ->
+            overlay.animate().cancel()
+            (overlay.parent as? ViewGroup)?.layoutTransition = null // Disable layout transitions
+
+            val offset = 50 * overlay.resources.displayMetrics.density
+
+            overlay.translationX = if (show) offset else 0f
+            playerBinding?.playerTracksOverlay?.isVisible = true
+
+            overlay.animate()
+                .translationX(if (show) 0f else offset)
+                .alpha(if (show) 1f else 0f)
+                .setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator()).withEndAction {
+                    if (!show) {
+                        playerBinding?.playerTracksOverlay?.isGone = true
                     }
                 }
                 .start()

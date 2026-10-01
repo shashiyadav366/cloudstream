@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.app
@@ -102,6 +103,35 @@ object RepositoryManager {
     }
     private val GH_REGEX =
         Regex("^https://raw.githubusercontent.com/([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+)/(.*)$")
+
+
+    /** Extracts the repository author from common GitHub style url, or null if not recognized. */
+    fun getRepositoryAuthor(repositoryUrl: String?): String? {
+        if (repositoryUrl == null) return null
+        val match = Regex("""github(?:usercontent|\.com)?\.com/([A-Za-z0-9-]+)/""")
+            .find(repositoryUrl)
+        return match?.groupValues?.getOrNull(1)
+    }
+
+    /** Returns the GitHub author name a provider plugin's repository was published
+     * under, or null for built-in/non-plugin providers. Falls back to the repo name. */
+    fun MainAPI.getRepositoryAuthorForProvider(): String? {
+        val source = sourcePlugin ?: return null
+        val folderName = File(source).parentFile?.name ?: return null
+        val repositories = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
+            ?: emptyArray()) + PREBUILT_REPOSITORIES
+        val repository = repositories.firstOrNull {
+            getPluginSanitizedFileName(it.url) == folderName
+        } ?: return null
+        return getRepositoryAuthor(repository.url) ?: repository.name
+    }
+
+    /** Unique, human readable label for a provider, e.g. "MovieBox - CNC".
+     * Built-in providers keep their plain name since plugin file paths are unique. */
+    fun MainAPI.getProviderLabel(): String {
+        val author = getRepositoryAuthorForProvider() ?: return name
+        return "$name - $author"
+    }
 
 
     /** Returns a SHA-256 string of the file content.

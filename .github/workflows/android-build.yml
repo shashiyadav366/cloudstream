@@ -1,0 +1,95 @@
+name: Build & Release Debug APK
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Grant execute permission
+        run: chmod +x gradlew
+
+      - name: Decode signing keystore
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keystore"
+          if ! base64 -d > "$RUNNER_TEMP/keystore/prerelease_keystore.keystore" <<< "$KS_B64" 2>/tmp/b64.err; then
+            echo "::error::base64 decode failed: $(cat /tmp/b64.err)"
+            exit 1
+          fi
+          if [ ! -s "$RUNNER_TEMP/keystore/prerelease_keystore.keystore" ]; then
+            echo "::error::Decoded keystore is empty. Check SIGNING_KEYSTORE_BASE64."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$RUNNER_TEMP/keystore/prerelease_keystore.keystore" -storepass "$KS_PASS" 2>&1; then
+            echo "::error::keytool could not read the keystore. Check store password and that the file is a valid keystore."
+            exit 1
+          fi
+          echo "Keystore ready at $RUNNER_TEMP/keystore"
+
+      - name: Show Gradle projects
+        run: ./gradlew projects
+
+      - name: Build Stable & Prerelease APKs
+        run: ./gradlew :app:assembleRelease
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+
+      - name: Prepare APK assets
+        id: assets
+        run: |
+          echo "Generated APKs:"
+          find . -type f -name "*.apk"
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' gradle/libs.versions.toml | head -n1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "APK version: $VERSION"
+          mkdir -p dist
+          cp app/build/outputs/apk/prerelease/release/app-prerelease-release.apk dist/app-prerelease-release.apk
+          cp app/build/outputs/apk/stable/release/app-stable-release.apk "dist/$VERSION.apk"
+          ls -la dist
+
+      - name: Cleanup previous automatic release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete pre-release --yes --cleanup-tag || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pre-release
+          target_commitish: ${{ github.sha }}
+          name: CloudStream v${{ steps.assets.outputs.version }}
+          body: |
+            Automatic build of the latest code.
+            App version: ${{ steps.assets.outputs.version }}
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/app-prerelease-release.apk
+            dist/${{ steps.assets.outputs.version }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          

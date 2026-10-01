@@ -609,6 +609,22 @@
         <item name="android:windowMinWidthMinor">95%</item> <!-- 95% -->
     </style>
 
+    <!--
+        Non-fullscreen bottom overlay for selecting sources/subtitles while the
+        video keeps playing and stays visible behind the panel.
+    -->
+    <style name="DialogOverlayPlayer" parent="DialogFullscreen">
+        <item name="android:windowBackground">?attr/primaryBlackBackground</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowTranslucentStatus">false</item>
+
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:navigationBarColor">?attr/primaryBlackBackground</item>
+        <item name="android:statusBarColor">?attr/primaryBlackBackground</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">?attr/isLightTheme</item>
+    </style>
+
     <style name="AlertDialogCustomBlack" parent="Theme.AppCompat.Dialog.Alert">
         <item name="android:windowBackground">?attr/primaryBlackBackground</item>
         <item name="android:layout_width">match_parent</item>

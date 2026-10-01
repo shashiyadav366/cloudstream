@@ -6,20 +6,45 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <ListView
-        android:id="@+id/listview1"
+    <!-- focusable root so the search field doesn't steal focus (and pop the
+         keyboard) as soon as the dialog opens -->
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_rowWeight="1"
-        android:layout_marginTop="10dp"
-        android:layout_marginBottom="60dp"
-        android:clipToPadding="false"
-        android:minHeight="0dp"
-        android:nestedScrollingEnabled="true"
-        android:nextFocusLeft="@id/apply_btt"
-        android:nextFocusRight="@id/cancel_btt"
-        android:requiresFadingEdge="vertical"
-        tools:listitem="@layout/sort_bottom_single_provider_choice" />
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:focusable="true"
+        android:focusableInTouchMode="true">
+
+        <EditText
+            android:id="@+id/provider_search_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:layout_marginTop="10dp"
+            android:hint="@string/search"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            android:nextFocusDown="@+id/listview1"
+            android:textColorHint="?attr/grayTextColor" />
+
+        <ListView
+            android:id="@+id/listview1"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="60dp"
+            android:clipToPadding="false"
+            android:minHeight="0dp"
+            android:nestedScrollingEnabled="true"
+            android:nextFocusUp="@id/provider_search_input"
+            android:nextFocusLeft="@id/apply_btt"
+            android:nextFocusRight="@id/cancel_btt"
+            android:requiresFadingEdge="vertical"
+            tools:listitem="@layout/sort_bottom_single_provider_choice" />
+    </LinearLayout>
 
     <LinearLayout
         android:orientation="vertical"

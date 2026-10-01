@@ -49,6 +49,7 @@ import com.lagradost.cloudstream3.ui.result.ImageAdapter
 import com.lagradost.cloudstream3.ui.search.SearchAdapter
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
+import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.updateTv
 import com.lagradost.cloudstream3.ui.settings.extensions.PluginAdapter
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
@@ -539,6 +540,21 @@ object CommonActivity {
     fun dispatchKeyEvent(act: Activity?, event: KeyEvent?): Boolean? {
         if (act == null) return null
         val currentFocus = act.currentFocus
+
+        // Handle the remote BACK button on TVs/emulators through this dispatcher so it only
+        // fires once. The active key listener (e.g. the video player) handles the first press
+        // (close overlay -> hide controls -> close player); anything not consumed falls through
+        // to the standard back press. Both key-down and key-up are consumed so the framework's
+        // own back handling cannot fire the same press a second time.
+        if (event?.keyCode == KeyEvent.KEYCODE_BACK && isLayout(TV or EMULATOR)) {
+            val handledByListener = keyEventListener?.invoke(Pair(event, false)) == true
+            if (handledByListener) return true
+
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                (act as? ComponentActivity)?.onBackPressedDispatcher?.onBackPressed()
+            }
+            return true
+        }
 
         event?.keyCode?.let { keyCode ->
             if (currentFocus == null || event.action != KeyEvent.ACTION_DOWN) return@let

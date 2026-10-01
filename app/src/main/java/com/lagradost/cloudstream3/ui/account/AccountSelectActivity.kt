@@ -1,6 +1,7 @@
 package com.lagradost.cloudstream3.ui.account
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.fragment.app.FragmentActivity
@@ -18,6 +19,7 @@ import com.lagradost.cloudstream3.ui.AutofitRecyclerView
 import com.lagradost.cloudstream3.ui.account.AccountAdapter.Companion.VIEW_TYPE_EDIT_ACCOUNT
 import com.lagradost.cloudstream3.ui.account.AccountAdapter.Companion.VIEW_TYPE_SELECT_ACCOUNT
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
@@ -43,6 +45,40 @@ class AccountSelectActivity : FragmentActivity(), BiometricCallback {
     }
 
     val accountViewModel: AccountViewModel by viewModels()
+
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("AccountSelectActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("AccountSelectActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("AccountSelectActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("AccountSelectActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode, options)
+    }
 
     @SuppressLint("NotifyDataSetChanged")
     override fun onCreate(savedInstanceState: Bundle?) {

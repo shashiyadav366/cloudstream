@@ -41,6 +41,9 @@ class BackupPreferences(preferences: PreferenceStore) {
     val frequency = preferences.getInt("automatic_backup_key", 0)
     val path = preferences.getString("backup_path_key")
     val visualPath = preferences.getString("backup_dir_key")
+    val destination = preferences.getString("backup_destination", "local")
+    val url = preferences.getString("backup_url", "")
+    val githubToken = preferences.getString("github_token", "")
 }
 class UpdatePreferences(preferences: PreferenceStore) {
     val apkInstaller = preferences.getInt("apk_installer_key",1)

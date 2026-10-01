@@ -6,7 +6,6 @@ import androidx.appcompat.widget.SearchView
 import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProvider
 import com.lagradost.cloudstream3.AllLanguagesName
-import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.databinding.FragmentPluginsBinding
@@ -68,6 +67,8 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
         val isLocal = arguments?.getBoolean(PLUGINS_BUNDLE_LOCAL) == true
         // download all extensions button
         val downloadAllButton = binding.settingsToolbar.menu?.findItem(R.id.download_all)
+        // delete all extensions button
+        val deleteAllButton = binding.settingsToolbar.menu?.findItem(R.id.delete_all)
 
         if (repositoryData == null) {
             dispatchBackPressed()
@@ -81,6 +82,10 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
                 when (menuItem?.itemId) {
                     R.id.download_all -> {
                         PluginsViewModel.downloadAll(activity, repositoryData, pluginViewModel)
+                    }
+
+                    R.id.delete_all -> {
+                        PluginsViewModel.deleteAll(activity, repositoryData, pluginViewModel)
                     }
 
                     R.id.lang_filter -> {
@@ -180,6 +185,7 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
         if (isLocal) {
             // No download button and no categories on local
             downloadAllButton?.isVisible = false
+            deleteAllButton?.isVisible = false
             binding.settingsToolbar.menu?.findItem(R.id.lang_filter)?.isVisible = false
             pluginViewModel.updatePluginListLocal()
 
@@ -187,8 +193,8 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
         } else {
             pluginViewModel.updatePluginList(context, listOf(repositoryData))
             binding.tvtypesChipsScroll.root.isVisible = true
-            // not needed for users but may be useful for devs
-            downloadAllButton?.isVisible = BuildConfig.DEBUG
+            downloadAllButton?.isVisible = true
+            deleteAllButton?.isVisible = true
 
             bindChips(
                 binding.tvtypesChipsScroll.tvtypesChips,

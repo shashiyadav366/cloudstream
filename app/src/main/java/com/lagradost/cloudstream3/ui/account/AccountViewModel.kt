@@ -55,10 +55,12 @@ class AccountViewModel : ViewModel() {
         } else currentAccounts.add(account)
 
         val currentHomePage = DataStoreHelper.currentHomePage
+        val currentHomeSource = DataStoreHelper.currentHomeSource
 
         setAccount(account)
 
         DataStoreHelper.currentHomePage = currentHomePage
+        DataStoreHelper.currentHomeSource = currentHomeSource
         DataStoreHelper.accounts = currentAccounts.toTypedArray()
 
         _accounts.postValue(getAccounts(context))

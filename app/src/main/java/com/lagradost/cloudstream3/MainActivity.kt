@@ -141,6 +141,7 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.updateHasTrailers
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.attachBackPressedCallback
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.detachBackPressedCallback
 import com.lagradost.cloudstream3.utils.BackupUtils.backup
+import com.lagradost.cloudstream3.utils.BackupUtils.consumeRestoreConfirmation
 import com.lagradost.cloudstream3.utils.BackupUtils.setUpBackup
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.BiometricCallback
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.biometricPrompt
@@ -157,7 +158,7 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper.accounts
 import com.lagradost.cloudstream3.utils.DataStoreHelper.migrateResumeWatching
 import com.lagradost.cloudstream3.utils.Event
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
-import com.lagradost.cloudstream3.utils.InAppUpdater.runAutoUpdate
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SnackbarHelper.showSnackbar
 import com.lagradost.cloudstream3.utils.TvChannelUtils
@@ -197,6 +198,44 @@ import kotlin.reflect.full.createInstance
 import kotlin.system.exitProcess
 
 class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCallback {
+    /**
+     * Defense-in-depth: some plugins reach this activity through `CommonActivity.activity`.
+     * Blocked external links are silently swallowed before leaving the process.
+     */
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i(TAG, "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
     companion object {
         var activityResultLauncher: ActivityResultLauncher<Intent>? = null
 
@@ -683,6 +722,14 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
     @SuppressLint("ApplySharedPref") // commit since the op needs to be synchronous
     private fun showConfirmExitDialog(settingsManager: SharedPreferences) {
+        // If a video is still playing in a picture-in-picture window, do not quit the
+        // app on the back gesture: keep the PiP alive and just background the task
+        // (mirrors YouTube's behavior) so playback is not killed.
+        if (isLayout(PHONE) && CommonActivity.isInPIPMode) {
+            moveTaskToBack(true)
+            return
+        }
+
         val confirmBeforeExit = settingsManager.getInt(getString(R.string.confirm_exit_key), -1)
 
         if (confirmBeforeExit == 1 || (confirmBeforeExit == -1 && isLayout(PHONE))) {
@@ -833,8 +880,9 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                             }
                         }
                         // it.hashCode() is not enough to make sure they are distinct
+                        // sourcePlugin keeps same-named providers from different repos apart
                         apis = allProviders.distinctBy {
-                            it.lang + it.name + it.mainUrl + it::class.qualifiedName
+                            it.sourcePlugin + it.lang + it.name + it.mainUrl + it::class.qualifiedName
                         }
                         APIHolder.apiMap = null
                     } catch (e: Exception) {
@@ -1352,6 +1400,11 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         }
 
         ioSafe { SafeFile.check(this@MainActivity) }
+
+        // Confirm a restore that finished just before the activity was recreated
+        if (consumeRestoreConfirmation(this)) {
+            showToast(R.string.restore_success, Toast.LENGTH_LONG)
+        }
 
         if (PluginManager.checkSafeModeFile()) {
             safe {
@@ -1988,10 +2041,6 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         }
 
         handleAppIntent(intent)
-
-        ioSafe {
-            runAutoUpdate() // TODO remove this when we update the updater autosearch
-        }
 
         FcastManager().init(this, false)
 

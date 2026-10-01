@@ -203,6 +203,22 @@ object DataStoreHelper {
             }
         }
 
+    /**
+     * The plugin file path (sourcePlugin) the current homepage provider was selected from.
+     * Needed to independently select same-named providers which live in different repositories,
+     * since currentHomePage only stores the (possibly ambiguous) provider name.
+     */
+    var currentHomeSource: String?
+        get() = getKey<String>("$currentAccount/$USER_SELECTED_HOMEPAGE_API/SOURCE")
+        set(value) {
+            val key = "$currentAccount/$USER_SELECTED_HOMEPAGE_API/SOURCE"
+            if (value == null) {
+                removeKey(key)
+            } else {
+                setKey(key, value)
+            }
+        }
+
     fun setAccount(account: Account, showToast : Boolean = true) {
         val homepage = currentHomePage
         selectedKeyIndex = account.keyIndex
@@ -838,4 +854,28 @@ object DataStoreHelper {
     var pinnedProviders: Array<String>
         get() = getKey<Array<String>>(USER_PINNED_PROVIDERS) ?: emptyArray<String>()
         set(value) = setKey(USER_PINNED_PROVIDERS, value)
+
+    /**
+     * Builds the storage key for a pinned provider.
+     *
+     * Built-in providers are stored by name, plugin providers by "name\u0000sourcePlugin"
+     * so two plugins exposing the same provider name (e.g. two different
+     * repositories both having "Moviebox") can be pinned independently.
+     * sourcePlugin (the plugin file path) is stable across restarts and unique
+     * per repository plugin file.
+     */
+    fun getProviderPinKey(name: String, sourcePlugin: String?): String {
+        return if (sourcePlugin == null) name else "$name\u0000$sourcePlugin"
+    }
+
+    /**
+     * True when a pin entry made by [getProviderPinKey] matches this provider.
+     * Matching is exact, so when several plugins expose the same provider name
+     * (e.g. two repositories both having "Moviebox") only the actually pinned
+     * one counts. Legacy name-only pins are upgraded to exact keys by the
+     * provider selector, see HomeFragment.
+     */
+    fun isProviderPinned(pins: Collection<String>, name: String, sourcePlugin: String?): Boolean {
+        return pins.contains(getProviderPinKey(name, sourcePlugin))
+    }
 }

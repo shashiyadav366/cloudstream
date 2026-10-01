@@ -148,6 +148,67 @@ class PluginsViewModel : ViewModel() {
                     }
                 }
             }
+
+        /**
+         * @param viewModel optional, updates the plugins livedata for that viewModel if included
+         * */
+        fun deleteAll(activity: Activity?, repository: RepositoryData, viewModel: PluginsViewModel?) =
+            ioSafe {
+                if (activity == null) return@ioSafe
+                val plugins = getPlugins(repository)
+
+                plugins.filter { pluginWrapper ->
+                    isDownloaded(
+                        activity,
+                        pluginWrapper.plugin.internalName,
+                        repository.url
+                    )
+                }.also { list ->
+                    main {
+                        showToast(
+                            when {
+                                // No plugins at all
+                                plugins.isEmpty() -> txt(
+                                    R.string.no_plugins_found_error,
+                                )
+                                // All plugins already deleted
+                                list.isEmpty() -> txt(
+                                    R.string.batch_delete_nothing_to_delete_format,
+                                    txt(R.string.plugin)
+                                )
+
+                                else -> txt(
+                                    R.string.batch_delete_start_format,
+                                    list.size,
+                                    txt(if (list.size == 1) R.string.plugin_singular else R.string.plugin)
+                                )
+                            },
+                            Toast.LENGTH_SHORT
+                        )
+                    }
+                }.amap { (_, _, metadata) ->
+                    val file = getPluginPath(
+                        activity,
+                        metadata.internalName,
+                        repository.url
+                    )
+                    PluginManager.deletePlugin(file)
+                }.main { list ->
+                    if (list.any { it }) {
+                        showToast(
+                            txt(
+                                R.string.batch_delete_finish_format,
+                                list.count { it },
+                                txt(if (list.size == 1) R.string.plugin_singular else R.string.plugin)
+                            ),
+                            Toast.LENGTH_SHORT
+                        )
+                        viewModel?.updatePluginListPrivate(activity, listOf(repository))
+                    } else if (list.isNotEmpty()) {
+                        showToast(R.string.error, Toast.LENGTH_SHORT)
+                    }
+                }
+            }
     }
 
     /**

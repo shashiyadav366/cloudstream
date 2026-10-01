@@ -6,6 +6,11 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextWatcher
+import android.text.style.RelativeSizeSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -25,8 +30,13 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.activityViewModels
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.RecyclerView
+import java.io.File
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.plugins.RepositoryManager
+import com.lagradost.cloudstream3.ui.settings.extensions.REPOSITORIES_KEY
+import com.lagradost.cloudstream3.ui.settings.extensions.RepositoryData
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.chip.Chip
@@ -84,6 +94,7 @@ import com.lagradost.cloudstream3.utils.TvChannelUtils
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 import com.lagradost.cloudstream3.utils.UIHelper.getSpanCount
+import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.UIHelper.popupMenuNoIconsAndNoStringRes
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
@@ -118,6 +129,38 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 noneApi.name -> getString(R.string.none)
                 randomApi.name -> getString(R.string.home_random)
                 else -> apiName
+            }
+        }
+
+        // Returns the GitHub author name a provider plugin's repository was published
+        // under, or null for built-in/non-plugin providers. Falls back to the repo name.
+        fun Context.getRepositoryAuthorForProvider(api: MainAPI): String? {
+            val source = api.sourcePlugin ?: return null
+            val folderName = File(source).parentFile?.name ?: return null
+            val repositories = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
+                ?: emptyArray()) + RepositoryManager.PREBUILT_REPOSITORIES
+            val repository = repositories.firstOrNull {
+                PluginManager.getPluginSanitizedFileName(it.url) == folderName
+            } ?: return null
+            return RepositoryManager.getRepositoryAuthor(repository.url) ?: repository.name
+        }
+
+        // Builds the provider label "baseName - author" where the author suffix is
+        // rendered in a very small font so identical provider names can be told apart.
+        fun Context.getProviderSelectorLabel(api: MainAPI, isMultiLang: Boolean): CharSequence {
+            val baseName = getDisplayName(api.name) ?: api.name
+            val author = getRepositoryAuthorForProvider(api)
+            val prefix =
+                if (isMultiLang) "${getFlagFromIso(api.lang)?.plus(" ") ?: ""}" else ""
+            if (author == null) return SpannableString("$prefix$baseName")
+            val full = "$prefix$baseName - $author"
+            return SpannableString(full).apply {
+                setSpan(
+                    RelativeSizeSpan(0.6f),
+                    (prefix + baseName + " - ").length,
+                    length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
             }
         }
 
@@ -381,7 +424,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             }
         }
 
-        fun Context.selectHomepage(selectedApiName: String?, callback: (String) -> Unit) {
+        fun Context.selectHomepage(
+            selectedApiName: String?,
+            selectedApiSource: String? = null,
+            callback: (MainAPI) -> Unit,
+        ) {
             val validAPIs = filterProviderByPreferredMedia().toMutableList()
 
             validAPIs.add(0, randomApi)
@@ -406,10 +453,20 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 }
                 //dialog.window?.setGravity(Gravity.BOTTOM)
 
+                // On TV, focus starts on the list; the search field is focused by
+                // navigating up from the list so the keyboard doesn't pop immediately.
+                binding.listview1.post {
+                    binding.listview1.requestFocus()
+                }
+
                 var currentApiName = selectedApiName
+                var currentApiSource = selectedApiSource
 
                 var currentValidApis: MutableList<MainAPI> = mutableListOf()
                 val preSelectedTypes = DataStoreHelper.homePreference.toMutableList()
+
+                // Current provider search query, empty shows everything
+                var providerQuery = ""
 
                 binding.cancelBtt.setOnClickListener {
                     dialog.dismissSafe()
@@ -417,7 +474,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
                 binding.applyBtt.setOnClickListener {
                     if (currentApiName != selectedApiName) {
-                        currentApiName?.let(callback)
+                        (
+                            currentValidApis.firstOrNull {
+                                it.name == currentApiName && it.sourcePlugin == currentApiSource
+                            } ?: currentValidApis.firstOrNull { it.name == currentApiName }
+                            )?.let(callback)
                     }
                     dialog.dismissSafe()
                 }
@@ -426,7 +487,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
                 val listView = dialog.findViewById<ListView>(R.id.listview1)
 
-                val arrayAdapter = object : ArrayAdapter<String>(
+                val arrayAdapter = object : ArrayAdapter<CharSequence>(
                     this, R.layout.sort_bottom_single_provider_choice,
                     mutableListOf()
                 ) {
@@ -441,11 +502,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                         val pinIcon = view.findViewById<ImageView>(R.id.pinicon)
                         val settingsIcon = view.findViewById<ImageView>(R.id.action_settings)
 
-                        val name = getItem(position)
-                        titleText?.text = name
                         val providerApi = currentValidApis[position]
-                        val isPinned =
-                            pinnedphashset.contains(providerApi.name)
+                        titleText?.text = getProviderSelectorLabel(providerApi, isMultiLang)
+                        val isPinned = DataStoreHelper.isProviderPinned(
+                            pinnedphashset, providerApi.name, providerApi.sourcePlugin
+                        )
                         pinIcon.visibility = if (isPinned) View.VISIBLE else View.GONE
 
                         val pluginInstance = providerApi.sourcePlugin?.let { PluginManager.plugins[it] } as? Plugin
@@ -472,20 +533,51 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 listView?.setOnItemClickListener { _, _, i, _ ->
                     if (currentValidApis.isNotEmpty()) {
                         currentApiName = currentValidApis[i].name
+                        currentApiSource = currentValidApis[i].sourcePlugin
                         //to switch to apply simply remove this
-                        currentApiName.let(callback)
+                        currentValidApis[i].let(callback)
                         dialog.dismissSafe()
                     }
                 }
 
                 fun updateList() {
                     DataStoreHelper.homePreference = preSelectedTypes
-                    val pinnedp = DataStoreHelper.pinnedProviders.toList()
+
+                    // Upgrade legacy name-only pins (pre multi-pin support) to exact
+                    // name+source keys before any pin state is used, so with identical
+                    // plugin names only the actually pinned one shows the pin icon.
+                    // Resolved against the full provider list, independent of filters.
+                    val allApiMap = LinkedHashMap<String, MainAPI>().apply {
+                        validAPIs.forEach {
+                            put(DataStoreHelper.getProviderPinKey(it.name, it.sourcePlugin), it)
+                        }
+                    }
+                    var pinnedp = DataStoreHelper.pinnedProviders.toList()
+                    if (pinnedp.any { !allApiMap.containsKey(it) }) {
+                        val claimedExactKeys = pinnedp.filterTo(HashSet()) { allApiMap.containsKey(it) }
+                        val resolvedPins = pinnedp.map { pin ->
+                            if (allApiMap.containsKey(pin)) {
+                                pin
+                            } else {
+                                allApiMap.entries.firstOrNull { (key, api) ->
+                                    pin == api.name && !claimedExactKeys.contains(key)
+                                }?.let { (_, api) ->
+                                    DataStoreHelper.getProviderPinKey(api.name, api.sourcePlugin)
+                                } ?: pin
+                            }
+                        }
+                        if (resolvedPins != pinnedp) {
+                            DataStoreHelper.pinnedProviders = resolvedPins.toTypedArray()
+                        }
+                        pinnedp = resolvedPins
+                    }
                     pinnedphashset = pinnedp.toHashSet()
                     arrayAdapter.clear()
                     val sortedApis = validAPIs
                         .filter {
-                            val isPinned = pinnedphashset.contains(it.name)
+                            val isPinned = DataStoreHelper.isProviderPinned(
+                                pinnedphashset, it.name, it.sourcePlugin
+                            )
 
                             // Hide pinned NSFW when NSFW not selected. NSFW is distracting when not chosen.
                             if (isPinned && !preSelectedTypes.contains(TvType.NSFW)) {
@@ -498,15 +590,33 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                         }
                         .sortedBy { it.name.lowercase() }
 
+                    // Filter by the search query when set. None/Random and the currently
+                    // selected provider always stay visible so the dialog can't get stuck.
+                    val query = providerQuery.trim()
+                    val queriedApis = if (query.isEmpty()) sortedApis else sortedApis.filter { api ->
+                        val isFixed = api == noneApi || api == randomApi ||
+                            (api.name == currentApiName &&
+                                (api.sourcePlugin == currentApiSource || currentApiSource == null))
+                        isFixed || getProviderSelectorLabel(api, isMultiLang)
+                            .toString().contains(query, ignoreCase = true)
+                    }
+
+                    // Key by name + sourcePlugin so same-named providers from different
+                    // plugins don't collapse into one entry ("Moviebox" from two repos).
                     val sortedApiMap = LinkedHashMap<String, MainAPI>().apply {
-                        sortedApis.forEach { put(it.name, it) }
+                        queriedApis.forEach {
+                            put(DataStoreHelper.getProviderPinKey(it.name, it.sourcePlugin), it)
+                        }
                     }
 
-                    val pinnedApis = pinnedp.asReversed().mapNotNull { name ->
-                        sortedApiMap[name]
-                    }
+                    val pinnedApis = pinnedp.asReversed().mapNotNull { pin ->
+                        sortedApiMap[pin]
+                    }.distinct()
 
-                    val remainingApis = sortedApis.filterNot { pinnedphashset.contains(it.name) }
+                    val remainingApis = queriedApis.filterNot { api ->
+                        DataStoreHelper.isProviderPinned(pinnedphashset, api.name, api.sourcePlugin) &&
+                            pinnedApis.any { it.name == api.name && it.sourcePlugin == api.sourcePlugin }
+                    }
 
                     currentValidApis = mutableListOf<MainAPI>().apply {
                         addAll(validAPIs.take(2))
@@ -514,12 +624,14 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                         addAll(remainingApis)
                     }
 
-                    val names = currentValidApis.map {
-                        val displayName = getDisplayName(it.name)
-                        if (isMultiLang) "${getFlagFromIso(it.lang)?.plus(" ") ?: ""}$displayName" else displayName
+                    val names = currentValidApis.map { api ->
+                        getProviderSelectorLabel(api, isMultiLang)
                     }
-                    val index = currentValidApis.map { it.name }.indexOf(currentApiName)
-                    listView?.setItemChecked(index, true)
+                    val index = currentValidApis.indexOfFirst {
+                        it.name == currentApiName && (currentApiSource == null || it.sourcePlugin == currentApiSource)
+                    }.takeIf { it != -1 }
+                        ?: -1
+                    if (index >= 0) listView?.setItemChecked(index, true)
                     arrayAdapter.addAll(names)
                     arrayAdapter.notifyDataSetChanged()
                 }
@@ -527,11 +639,16 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 listView?.setOnItemLongClickListener { _, _, i, _ ->
                     if (currentValidApis.isNotEmpty() && i > 1) {
                         val pinnedp = DataStoreHelper.pinnedProviders.toMutableList()
-                        val thisapi = currentValidApis[i].name
-                        if (pinnedp.contains(thisapi)) {
-                            pinnedp.remove(thisapi)
+                        val thisapi = currentValidApis[i]
+                        val pinKey = DataStoreHelper.getProviderPinKey(thisapi.name, thisapi.sourcePlugin)
+                        if (pinnedp.contains(pinKey)) {
+                            pinnedp.remove(pinKey)
                         } else {
-                            pinnedp.add(thisapi)
+                            // Replace any legacy name-only pin with the name+source key so
+                            // only this provider is pinned and the other same-named
+                            // provider stays in the list (pin one "Moviebox" at a time).
+                            pinnedp.remove(thisapi.name)
+                            pinnedp.add(pinKey)
                         }
                         DataStoreHelper.pinnedProviders = pinnedp.toTypedArray()
                         updateList()
@@ -548,6 +665,26 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                     preSelectedTypes.addAll(list)
                     updateList()
                 }
+
+                // Live provider search
+                binding.providerSearchInput.addTextChangedListener(object : TextWatcher {
+                    override fun afterTextChanged(s: Editable?) {
+                        providerQuery = s?.toString() ?: ""
+                        updateList()
+                    }
+
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                })
+
+                // TV: pressing back from the search field should leave the field, not
+                // close the dialog. Clearing focus returns D-pad focus to the list.
+                binding.providerSearchInput.setOnFocusChangeListener { v, hasFocus ->
+                    if (!hasFocus) {
+                        hideKeyboard(v)
+                    }
+                }
+
                 updateList()
             }
         }
@@ -620,7 +757,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
     }
 
     private val apiChangeClickListener = View.OnClickListener { view ->
-        view.context.selectHomepage(currentApiName) { api ->
+        view.context.selectHomepage(currentApiName, DataStoreHelper.currentHomeSource) { api ->
             homeViewModel.loadAndCancel(api, forceReload = true, fromUI = true)
         }
         /*val validAPIs = view.context?.filterProviderByPreferredMedia()?.toMutableList() ?: mutableListOf()
@@ -633,6 +770,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
     }
 
     private var currentApiName: String? = null
+    private var currentApiSource: String? = null
     private var toggleRandomButton = false
 
     private var bottomSheetDialog: BottomSheetDialog? = null
@@ -822,6 +960,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
         observe(homeViewModel.apiName) { apiName ->
             currentApiName = apiName
+            currentApiSource = DataStoreHelper.currentHomeSource
             val displayApiName = context?.getDisplayName(apiName) ?: apiName
             binding.apply {
                 homeApiFab.text = displayApiName

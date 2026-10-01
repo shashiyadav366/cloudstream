@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
@@ -28,6 +29,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safeApiCall
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream3.sortUrls
 import com.lagradost.cloudstream3.ui.player.LOADTYPE_CHROMECAST
 import com.lagradost.cloudstream3.ui.player.RepoLinkGenerator
@@ -358,6 +360,38 @@ class SkipTimeController(val view: ImageView, forwards: Boolean) : UIController(
 }
 
 class ControllerActivity : ExpandedControllerActivity() {
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("ControllerActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("ControllerActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
+    override fun startActivityForResult(intent: Intent, requestCode: Int) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("ControllerActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode)
+    }
+
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent)) {
+            Log.i("ControllerActivity", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         super.onCreateOptionsMenu(menu)
         menuInflater.inflate(R.menu.cast_expanded_controller_menu, menu)

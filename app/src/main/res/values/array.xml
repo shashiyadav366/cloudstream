@@ -24,6 +24,13 @@
         <item>Quad9</item>
         <item>DNS.SB</item>
         <item>Canadian Shield</item>
+        <item>AdGuard (DoT)</item>
+        <item>Google (DoT)</item>
+        <item>Cloudflare (DoT)</item>
+        <item>Quad9 (DoT)</item>
+        <item>DNS.SB (DoT)</item>
+        <item>DNS.WATCH (DoT)</item>
+        <item>Canadian Shield (DoT)</item>
     </array>
     <array name="dns_pref_values">
         <item>0</item>
@@ -35,6 +42,13 @@
         <item>6</item>
         <item>7</item>
         <item>8</item>
+        <item>9</item>
+        <item>10</item>
+        <item>11</item>
+        <item>12</item>
+        <item>13</item>
+        <item>14</item>
+        <item>15</item>
     </array>
 
     <array name="apk_installer_pref">

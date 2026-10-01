@@ -12,6 +12,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -60,16 +61,29 @@ object MainActivityScreen : Screen {
                 isDebug = BuildConfig.DEBUG,
                 buildSha = activity.currentCommitHash(),
                 settings = settings,
-                updater = ApkUpdater
-            )/*.apply {
-                onAction(AutoSearchForUpdate) // Remove this for now
-            }*/
+                updater = ApkUpdater,
+                appContext = activity,
+            )
         }
     }
 
     @Composable
     override fun Content() {
+        AutoUpdateEffect()
         GithubView()
+    }
+
+    /**
+     * Automatic update check when the app opens, using the same viewmodel as the
+     * manual "Check for updates" button. The dialog only shows when an update is
+     * actually found (isFromUser = false), just like the old on-load updater.
+     */
+    @Composable
+    fun AutoUpdateEffect() {
+        val updateViewModel = githubViewModel() ?: return
+        LaunchedEffect(Unit) {
+            updateViewModel.onAction(AutoSearchForUpdate)
+        }
     }
 
     @Composable

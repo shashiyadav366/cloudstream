@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.DialogInterface
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.text.Editable
+import android.text.TextWatcher
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -319,6 +321,15 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                     listView?.adapter = arrayAdapter
                     listView?.choiceMode = AbsListView.CHOICE_MODE_MULTIPLE
 
+                    // Current provider search query, empty shows everything
+                    var providerQuery = ""
+
+                    // On TV, focus starts on the list; the search field is focused by
+                    // navigating up from the list so the keyboard doesn't pop immediately.
+                    listView?.post {
+                        listView?.requestFocus()
+                    }
+
                     listView?.setOnItemClickListener { _, _, i, _ ->
                         if (currentValidApis.isNotEmpty()) {
                             val api = currentValidApis[i].name
@@ -341,6 +352,14 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                                 types.contains(it)
                             }
                         }.sortedBy { it.name.lowercase() }
+
+                        // Filter by the search query when set
+                        val query = providerQuery.trim()
+                        if (query.isNotEmpty()) {
+                            currentValidApis = currentValidApis.filter { api ->
+                                api.name.contains(query, ignoreCase = true)
+                            }
+                        }
 
                         val names = currentValidApis.map {
                             if (isMultiLang) "${
@@ -402,6 +421,26 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                             search(binding.mainSearch.query.toString())
                         }
                     }
+                    // Live provider search
+                    selectMainpageBinding.providerSearchInput.addTextChangedListener(
+                        object : TextWatcher {
+                            override fun afterTextChanged(s: Editable?) {
+                                providerQuery = s?.toString() ?: ""
+                                updateList(selectedSearchTypes.toList())
+                            }
+
+                            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                        })
+
+                    // TV: losing focus (e.g. pressing back out of the IME) hides the
+                    // keyboard and returns D-pad focus to the list.
+                    selectMainpageBinding.providerSearchInput.setOnFocusChangeListener { v, hasFocus ->
+                        if (!hasFocus) {
+                            hideKeyboard(v)
+                        }
+                    }
+
                     updateList(selectedSearchTypes.toList())
                 }
             }
@@ -501,8 +540,14 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
 
                 val pinnedOrder = DataStoreHelper.pinnedProviders.reversedArray()
 
+                // Pin entries are provider names (legacy) or "name\u0000sourcePlugin" keys,
+                // while search sections are keyed by labels like "Name - author".
+                // Compare on the base name so same-named providers are ordered by their pin.
                 val sortedList = list.toList().sortedWith(compareBy { (providerName, _) ->
-                    val index = pinnedOrder.indexOf(providerName)
+                    val index = pinnedOrder.indexOfFirst { pin ->
+                        val pinName = pin.substringBefore('\u0000')
+                        providerName == pinName || providerName.startsWith("$pinName - ")
+                    }
                     if (index == -1) Int.MAX_VALUE else index
                 })
 

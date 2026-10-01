@@ -37,7 +37,7 @@ class ResultTrailerPlayer : ResultFragmentPhone() {
     private var introVisible = true
 
     // Single-tap on empty player area: toggle controls.
-    override fun onSingleTap() {
+    override fun onSingleTap(x: Float, viewWidth: Int) {
         if (introVisible) return
         if (isShowing) uiReset() else showControls()
     }

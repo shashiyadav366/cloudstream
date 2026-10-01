@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
@@ -29,6 +31,7 @@ import com.lagradost.cloudstream3.utils.DataStore.removeKey
 import com.lagradost.cloudstream3.utils.DataStore.removeKeys
 import com.lagradost.cloudstream3.utils.DataStore.setKey
 import com.lagradost.cloudstream3.utils.ImageLoader.buildImageLoader
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.FileNotFoundException
@@ -96,6 +99,28 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
         return buildImageLoader(applicationContext)
     }
 
+    /**
+     * Plugins load in-process and obtain this Application instance through
+     * `com.lagradost.api.getContext()`. Blocked external links (e.g. the omg10.com
+     * ad-redirect used by some plugins) are silently swallowed before the system
+     * intent resolver ever sees them.
+     */
+    override fun startActivity(intent: Intent) {
+        if (LinkBlocker.isBlocked(intent.dataString)) {
+            Log.i("CloudStream", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent)
+    }
+
+    override fun startActivity(intent: Intent, options: Bundle?) {
+        if (LinkBlocker.isBlocked(intent.dataString)) {
+            Log.i("CloudStream", "Blocked external link: ${intent.dataString}")
+            return
+        }
+        super.startActivity(intent, options)
+    }
+
     companion object {
         var exceptionHandler: ExceptionHandler? = null
 
@@ -113,7 +138,10 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
             get() = _context?.get()
             private set(value) {
                 _context = WeakReference(value)
-                setContext(value)
+                // Give plugins the Application instance (not the raw base context) so that
+                // `getContext().startActivity(...)` from any extension is routed through
+                // CloudStreamApp.startActivity and thus intercepted by LinkBlocker.
+                setContext(this)
             }
 
         fun <T : Any> getKeyClass(path: String, valueType: Class<T>): T? {

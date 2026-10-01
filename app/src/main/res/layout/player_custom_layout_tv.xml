@@ -891,7 +891,7 @@
                         android:focusable="true"
                         android:focusableInTouchMode="true"
                         android:nextFocusUp="@id/skip_chapter_button"
-                        android:nextFocusDown="@id/player_lock_holder"
+                        android:nextFocusDown="@id/player_resize_btt"
                         android:src="@drawable/netflix_pause"
 
                         android:tag="@string/tv_no_focus_tag"
@@ -1027,22 +1027,21 @@
                         android:orientation="horizontal">
 
                         <FrameLayout
-                            android:layout_width="0dp"
-                            android:layout_height="0dp"
-                            android:visibility="gone">
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_lock"
                                 style="@style/VideoButtonTV"
-                                android:nextFocusLeft="@id/player_skip_episode"
-
-                                android:nextFocusRight="@id/player_resize_btt"
+                                android:nextFocusLeft="@id/player_mute_btt"
+                                android:nextFocusRight="@id/player_skip_op"
                                 android:nextFocusUp="@id/player_pause_play"
+                                android:nextFocusDown="@id/player_skip_op"
                                 android:text="@string/video_lock"
                                 android:visibility="gone"
                                 app:icon="@drawable/video_locked" />
                         </FrameLayout>
-
+                        
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/player_rotate_btt"
                             style="@style/VideoButton"
@@ -1050,8 +1049,8 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/player_skip_op"
-                            style="@style/VideoButtonTV"
-                            android:nextFocusLeft="@id/player_pause_play"
+                            style="@style/VideoButtonTV"                     
+                            android:nextFocusLeft="@id/player_lock"
                             android:nextFocusRight="@id/player_skip_episode"
                             android:nextFocusUp="@id/player_pause_play"
                             android:nextFocusDown="@id/player_skip_episode"
@@ -1130,11 +1129,20 @@
                             android:id="@+id/player_compressor_btt"
                             style="@style/VideoButtonTV"
                             android:nextFocusLeft="@id/player_tracks_btt"
-                            android:nextFocusRight="@id/player_skip_op"
+                            android:nextFocusRight="@id/player_mute_btt"
                             android:nextFocusUp="@id/player_pause_play"
-                            android:nextFocusDown="@id/player_skip_op"
+                            android:nextFocusDown="@id/player_mute_btt"
                             android:text="@string/compressor"
                             app:icon="@drawable/ic_compressor_24" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/player_mute_btt"
+                            style="@style/VideoButtonTV"
+                            android:nextFocusLeft="@id/player_compressor_btt"
+                            android:nextFocusRight="@id/player_lock"
+                            android:nextFocusUp="@id/player_pause_play"
+                            android:text="@string/mute"
+                            app:icon="@drawable/ic_baseline_volume_up_24" />
                     </LinearLayout>
                 </HorizontalScrollView>
             </LinearLayout>
@@ -1201,4 +1209,30 @@
         </androidx.recyclerview.widget.RecyclerView>
     </LinearLayout>
 
+
+    <LinearLayout
+        android:id="@+id/player_tracks_overlay"
+        android:layout_width="460dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="?attr/primaryBlackBackground"
+        android:orientation="vertical"
+        android:padding="5dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_tracks_overlay_title"
+            style="@style/WatchHeaderText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="0dp"
+            android:padding="10dp"
+            android:text="@string/tracks"
+            android:textSize="15sp" />
+
+        <FrameLayout
+            android:id="@+id/player_tracks_overlay_content"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </LinearLayout>
 </FrameLayout>

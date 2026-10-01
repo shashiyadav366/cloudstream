@@ -2,26 +2,46 @@ package com.lagradost.cloudstream3.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.integerArrayResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import com.lagradost.cloudstream3.AutoDownloadMode
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.CommonActivity.activity
+import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.MainActivityScreen
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.utils.BackupUtils
+import com.lagradost.cloudstream3.utils.BackupUtils.restoreFromPath
 import com.lagradost.cloudstream3.utils.BackupUtils.restorePrompt
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.InAppUpdater.installPreReleaseIfNeeded
@@ -71,7 +91,11 @@ object SettingsUpdatesScreen : SearchableSettings {
             }
 
         val visualBackupPath by settings.backup.visualPath.collectAsState()
+        val backupUrl by settings.backup.url.collectAsState()
         var showDialog by remember { mutableStateOf(false) }
+        var showBackupPathDialog by remember { mutableStateOf(false) }
+        var showGitHubTokenDialog by remember { mutableStateOf(false) }
+        var pendingBackupAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
         if (showDialog) {
             com.lagradost.cloudstream3.ui.settings.logcat.LogcatDialog {
@@ -79,6 +103,126 @@ object SettingsUpdatesScreen : SearchableSettings {
             }
         }
 
+        if (showBackupPathDialog) {
+            val current = remember { settings.backup.url.get() }
+            var value by remember { mutableStateOf(current) }
+            AlertDialog(
+                onDismissRequest = { showBackupPathDialog = false },
+                title = { Text(stringResource(R.string.backup_path_or_url_title)) },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        OutlinedTextField(
+                            value = value,
+                            onValueChange = { value = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val trimmed = value.trim()
+                        if (trimmed.isBlank()) {
+                            showToast(R.string.backup_path_empty, Toast.LENGTH_SHORT)
+                        } else {
+                            settings.backup.url.set(trimmed)
+                            showBackupPathDialog = false
+                            pendingBackupAction?.invoke()
+                            pendingBackupAction = null
+                        }
+                    }) { Text(stringResource(R.string.ok)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showBackupPathDialog = false
+                        pendingBackupAction = null
+                    }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
+
+        if (showGitHubTokenDialog) {
+            val current =
+                remember { settings.backup.githubToken.get() }
+            var value by remember { mutableStateOf(current) }
+            AlertDialog(
+                onDismissRequest = { showGitHubTokenDialog = false },
+                title = { Text(stringResource(R.string.github_token_title)) },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        OutlinedTextField(
+                            value = value,
+                            onValueChange = { value = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            visualTransformation = PasswordVisualTransformation(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val trimmed = value.trim()
+                        if (trimmed.isBlank()) {
+                            showToast(R.string.github_token_empty, Toast.LENGTH_SHORT)
+                        } else {
+                            settings.backup.githubToken.set(trimmed)
+                            showGitHubTokenDialog = false
+                            pendingBackupAction?.invoke()
+                            pendingBackupAction = null
+                        }
+                    }) { Text(stringResource(R.string.ok)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showGitHubTokenDialog = false
+                        pendingBackupAction = null
+                    }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
+
+        fun isGitHubUrl(path: String): Boolean {
+            return path.startsWith("https://github.com") ||
+                path.startsWith("https://raw.githubusercontent.com")
+        }
+        fun runBackup() {
+            val destination = settings.backup.destination.get()
+            when (destination) {
+                BackupUtils.BACKUP_DESTINATION_PATH_URL -> {
+                    val path = settings.backup.url.get()
+                    val appContext = CloudStreamApp.context
+                    if (path.isBlank()) {
+                        pendingBackupAction = { runBackup() }
+                        showBackupPathDialog = true
+                    } else if (isGitHubUrl(path) && appContext != null &&
+                        BackupUtils.getBackupToken(appContext).isNullOrBlank()
+                    ) {
+                        pendingBackupAction = { runBackup() }
+                        showGitHubTokenDialog = true
+                    } else {
+                        BackupUtils.backupToPath(activity, path)
+                    }
+                }
+                else -> BackupUtils.backup(activity)
+            }
+        }
+        fun runRestore() {
+            val destination = settings.backup.destination.get()
+            when (destination) {
+                BackupUtils.BACKUP_DESTINATION_PATH_URL -> {
+                    val path = settings.backup.url.get()
+                    if (path.isBlank()) {
+                        pendingBackupAction = { runRestore() }
+                        showBackupPathDialog = true
+                    } else {
+                        (activity as? FragmentActivity)?.restoreFromPath(path)
+                    }
+                }
+                else -> (activity as? FragmentActivity)?.restorePrompt()
+            }
+        }
         val githubViewModel = MainActivityScreen.githubViewModel()
 
         return persistentListOf(
@@ -137,7 +281,34 @@ object SettingsUpdatesScreen : SearchableSettings {
                         title = stringResource(R.string.backup_settings),
                         icon = painterResource(R.drawable.save_as_24px),
                         onClick = {
-                            BackupUtils.backup(activity)
+                            runBackup()
+                        }
+                    ),
+                    Preference.PreferenceItem.ListPreference(
+                        title = stringResource(R.string.backup_destination_title),
+                        icon = painterResource(R.drawable.ic_baseline_cloud_upload_24),
+                        entries = persistentListOf(
+                            BackupUtils.BACKUP_DESTINATION_LOCAL to stringResource(R.string.backup_destination_local),
+                            BackupUtils.BACKUP_DESTINATION_PATH_URL to stringResource(R.string.backup_destination_path_url),
+                        ).toMap(),
+                        subtitleProvider = { v, e -> e[v] },
+                        preference = settings.backup.destination,
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(R.string.backup_path_or_url_title),
+                        icon = painterResource(R.drawable.ic_baseline_link_24),
+                        subtitle = backupUrl.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.backup_destination_path_url),
+                        onClick = {
+                            showBackupPathDialog = true
+                        }
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(R.string.github_token_title),
+                        subtitle = stringResource(R.string.github_token_summary),
+                        icon = painterResource(R.drawable.ic_baseline_vpn_key_24),
+                        onClick = {
+                            showGitHubTokenDialog = true
                         }
                     ),
                     Preference.PreferenceItem.ListPreference(
@@ -163,7 +334,7 @@ object SettingsUpdatesScreen : SearchableSettings {
                         title = stringResource(R.string.restore_settings),
                         icon = painterResource(R.drawable.restore_page_24px),
                         onClick = {
-                            activity?.restorePrompt()
+                            runRestore()
                         }
                     ),
                 )

@@ -5,6 +5,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.apis
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
@@ -499,6 +500,21 @@ class HomeViewModel : ViewModel() {
 
     // only save the key if it is from UI, as we don't want internal functions changing the setting
     fun loadAndCancel(
+        preferredApi: MainAPI,
+        forceReload: Boolean = true,
+        fromUI: Boolean = false
+    ) =
+        ioSafe {
+            if (fromUI) {
+                DataStoreHelper.currentHomePage = preferredApi.name
+                DataStoreHelper.currentHomeSource = preferredApi.sourcePlugin
+            }
+            loadAndCancel(preferredApi)
+            reloadAccount()
+        }
+
+    // only save the key if it is from UI, as we don't want internal functions changing the setting
+    fun loadAndCancel(
         preferredApiName: String?,
         forceReload: Boolean = true,
         fromUI: Boolean = false
@@ -516,10 +532,21 @@ class HomeViewModel : ViewModel() {
                 return@ioSafe
             }
 
-            val api = getApiFromNameNull(preferredApiName)
+            val api =
+                if (DataStoreHelper.currentHomeSource == null) {
+                    getApiFromNameNull(preferredApiName)
+                } else {
+                    APIHolder.getApiFromSourceAndNameNull(
+                        preferredApiName,
+                        DataStoreHelper.currentHomeSource
+                    ) ?: getApiFromNameNull(preferredApiName)
+                }
             if (preferredApiName == noneApi.name) {
                 // just set to random
-                if (fromUI) DataStoreHelper.currentHomePage = noneApi.name
+                if (fromUI) {
+                    DataStoreHelper.currentHomePage = noneApi.name
+                    DataStoreHelper.currentHomeSource = null
+                }
                 loadAndCancel(noneApi)
             } else if (preferredApiName == randomApi.name) {
                 // randomize the api, if none exist like if not loaded or not installed
@@ -530,7 +557,10 @@ class HomeViewModel : ViewModel() {
                 } else {
                     val apiRandom = validAPIs.random()
                     loadAndCancel(apiRandom)
-                    if (fromUI) DataStoreHelper.currentHomePage = apiRandom.name
+                    if (fromUI) {
+                        DataStoreHelper.currentHomePage = apiRandom.name
+                        DataStoreHelper.currentHomeSource = apiRandom.sourcePlugin
+                    }
                 }
             } else if (api == null) {
                 // API is not found aka not loaded or removed, post the loading
@@ -544,7 +574,10 @@ class HomeViewModel : ViewModel() {
                 }
             } else {
                 // if the api is found, then set it to it and save key
-                if (fromUI) DataStoreHelper.currentHomePage = api.name
+                if (fromUI) {
+                    DataStoreHelper.currentHomePage = api.name
+                    DataStoreHelper.currentHomeSource = api.sourcePlugin
+                }
                 loadAndCancel(api)
             }
             reloadAccount()

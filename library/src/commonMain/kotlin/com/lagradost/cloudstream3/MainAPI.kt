@@ -164,6 +164,18 @@ object APIHolder {
         }
     }
 
+    /**
+     * Resolves a provider by its plugin file path (sourcePlugin) and name.
+     * This allows independently selecting same-named providers from different
+     * repositories, since sourcePlugin is unique per repository plugin file.
+     */
+    fun getApiFromSourceAndNameNull(apiName: String?, sourcePlugin: String?): MainAPI? {
+        if (apiName == null || sourcePlugin == null) return null
+        return allProviders.withLock {
+            allProviders.firstOrNull { it.sourcePlugin == sourcePlugin && it.name == apiName }
+        }
+    }
+
     fun getApiFromUrlNull(url: String?): MainAPI? {
         if (url == null) return null
         return allProviders.withLock {

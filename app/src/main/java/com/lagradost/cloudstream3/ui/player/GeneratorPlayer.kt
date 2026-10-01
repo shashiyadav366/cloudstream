@@ -13,9 +13,11 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Spanned
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.AbsListView
 import android.widget.ArrayAdapter
 import android.widget.ImageView
@@ -55,7 +57,6 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.getAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getTMDbId
-import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.amap
@@ -76,6 +77,7 @@ import com.lagradost.cloudstream3.subtitles.AbstractSubtitleEntities
 import com.lagradost.cloudstream3.subtitles.AbstractSubtitleEntities.SubtitleSearch
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.subtitleProviders
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
+import com.lagradost.cloudstream3.ui.player.CSPlayerEvent
 import com.lagradost.cloudstream3.ui.player.CS3IPlayer.Companion.preferredAudioTrackLanguage
 import com.lagradost.cloudstream3.ui.player.CustomDecoder.Companion.updateForcedEncoding
 import com.lagradost.cloudstream3.ui.player.PlayerSubtitleHelper.Companion.toSubtitleMimeType
@@ -311,11 +313,18 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
 
                 override fun createCurrentContentIntent(player: Player): PendingIntent? {
-                    // Open the app without creating a new task to resume playback seamlessly
+                    // Open the full-screen player so tapping the notification brings
+                    // back the video instead of only the app home. REORDER_TO_FRONT
+                    // expands the existing PiP player when it is still alive; the
+                    // launch arguments re-open the same video if it was destroyed.
+                    val contentIntent = Intent(context, PlayerActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        arguments?.let { putExtras(it) }
+                    }
                     return PendingIntentCompat.getActivity(
                         context,
                         0,
-                        Intent(context, MainActivity::class.java),
+                        contentIntent,
                         0,
                         false
                     )
@@ -1014,11 +1023,14 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     override fun showMirrorsDialogue() {
         try {
+            // Only one control at a time: the newest one wins.
+            toggleEpisodesOverlay(false)
+            toggleTracksOverlay(false)
+            closePlayerDialogs()
+
             currentSelectedSubtitles = player.getCurrentPreferredSubtitle()
             //println("CURRENT SELECTED :$currentSelectedSubtitles of $currentSubs")
             context?.let { ctx ->
-                val isPlaying = player.getIsPlaying()
-                player.handleEvent(CSPlayerEvent.Pause, PlayerEventSource.UI)
                 val currentSubtitles = sortSubs(viewModel.state.subtitles)
 
                 val sourceDialog = Dialog(ctx, R.style.DialogFullscreenPlayer)
@@ -1028,6 +1040,8 @@ class GeneratorPlayer : FullScreenPlayer() {
 
                 fixSystemBarsPadding(binding.root)
                 selectSourceDialog = sourceDialog
+                sourceDialog.setCancelable(true)
+                sourceDialog.setCanceledOnTouchOutside(true)
 
                 sourceDialog.show()
                 val providerList = binding.sortProviders
@@ -1054,9 +1068,6 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
 
                 fun dismiss() {
-                    if (isPlaying) {
-                        player.handleEvent(CSPlayerEvent.Play)
-                    }
                     activity?.hideSystemUI()
                 }
 
@@ -1413,9 +1424,6 @@ class GeneratorPlayer : FullScreenPlayer() {
             context?.let { ctx ->
                 val tracks = player.getVideoTracks()
 
-                val isPlaying = player.getIsPlaying()
-                player.handleEvent(CSPlayerEvent.Pause)
-
                 val currentVideoTracks = tracks.allVideoTracks.sortedBy {
                     it.height?.times(-1)
                 }
@@ -1438,9 +1446,6 @@ class GeneratorPlayer : FullScreenPlayer() {
                 binding.audioTracksHolder.isVisible = currentAudioTracks.size > 1
 
                 fun dismiss() {
-                    if (isPlaying) {
-                        player.handleEvent(CSPlayerEvent.Play)
-                    }
                     activity?.hideSystemUI()
                 }
 
@@ -1555,6 +1560,145 @@ class GeneratorPlayer : FullScreenPlayer() {
                     }
                     trackDialog.dismissSafe(activity)
                     this.selectTrackDialog = null
+                }
+            }
+        } catch (e: Exception) {
+            logError(e)
+        }
+    }
+
+    override fun showTracksOverlay() {
+        try {
+            playerBinding?.apply {
+                val ctx = this@GeneratorPlayer.context ?: return@apply
+
+                // Reuse the exact same tracks layout/logic as the previous dialog,
+                // only this time it is rendered inside the right-side overlay panel.
+                playerTracksOverlayContent.removeAllViews()
+                val binding: PlayerSelectTracksBinding =
+                    PlayerSelectTracksBinding.inflate(
+                        LayoutInflater.from(ctx),
+                        playerTracksOverlayContent,
+                        false
+                    )
+                playerTracksOverlayContent.addView(binding.root)
+
+                val tracks = player.getVideoTracks()
+
+                val currentVideoTracks = tracks.allVideoTracks.sortedBy {
+                    it.height?.times(-1)
+                }
+                val currentAudioTracks = tracks.allAudioTracks
+
+                val videosList = binding.videoTracksList
+                val audioList = binding.autoTracksList
+
+                binding.videoTracksHolder.isVisible = currentVideoTracks.size > 1
+                binding.audioTracksHolder.isVisible = currentAudioTracks.size > 1
+
+                val videosArrayAdapter =
+                    ArrayAdapter<String>(ctx, R.layout.sort_bottom_single_choice)
+
+                videosArrayAdapter.addAll(currentVideoTracks.mapIndexed { index, format ->
+                    format.label
+                        ?: (if (format.height == NO_VALUE || format.width == NO_VALUE) index else "${format.width}x${format.height}").toString()
+                })
+
+                videosList.choiceMode = AbsListView.CHOICE_MODE_SINGLE
+                videosList.adapter = videosArrayAdapter
+
+                var videoIndex = currentVideoTracks.indexOf(tracks.currentVideoTrack).takeIf {
+                    it != -1
+                } ?: currentVideoTracks.indexOfFirst {
+                    tracks.currentVideoTrack?.id == it.id
+                }
+
+                videosList.setSelection(videoIndex)
+                videosList.setItemChecked(videoIndex, true)
+
+                videosList.setOnItemClickListener { _, _, which, _ ->
+                    videoIndex = which
+                    videosList.setItemChecked(which, true)
+                }
+
+                var audioIndexStart = currentAudioTracks.indexOfFirst { track ->
+                    track.id == tracks.currentAudioTrack?.id &&
+                            track.formatIndex == tracks.currentAudioTrack?.formatIndex
+                }.coerceAtLeast(0)
+
+                val audioArrayAdapter =
+                    ArrayAdapter<String>(ctx, R.layout.sort_bottom_single_choice)
+
+                audioArrayAdapter.addAll(
+                    currentAudioTracks.mapIndexed { _, track ->
+
+                        val language = (
+                                track.language?.trim()?.let { raw ->
+                                    fromTagToLanguageName(raw)
+                                        ?: fromTagToLanguageName(
+                                            raw.replace('_', '-').substringBefore('-').lowercase()
+                                        )
+                                        ?: raw
+                                }
+                                    ?: track.label
+                                    ?: "Audio"
+                                ).replaceFirstChar { it.uppercaseChar() }
+
+                        val codec = audioCodecName(track.sampleMimeType)
+
+                        val channelCount = track.channelCount
+
+                        val channels = when {
+                            // May be below 1 or null when unknown
+                            channelCount == null || channelCount <= 0 -> ""
+                            channelCount == 1 -> "Mono"
+                            channelCount == 2 -> "Stereo"
+                            channelCount == 6 -> "5.1"
+                            channelCount == 8 -> "7.1"
+                            else -> "${channelCount}ch"
+                        }
+
+                        listOfNotNull(
+                            language.takeIf { it.isNotBlank() }
+                                ?.replaceFirstChar { it.uppercaseChar() },
+                            channels.takeIf { it.isNotBlank() },
+                            codec.takeIf { it.isNotBlank() }?.uppercase()
+                        ).joinToString(" • ")
+
+
+                    }
+                )
+
+                audioList.adapter = audioArrayAdapter
+                audioList.choiceMode = AbsListView.CHOICE_MODE_SINGLE
+
+                audioList.setSelection(audioIndexStart)
+                audioList.setItemChecked(audioIndexStart, true)
+
+                audioList.setOnItemClickListener { _, _, which, _ ->
+                    audioIndexStart = which
+                    audioList.setItemChecked(which, true)
+                }
+
+                binding.cancelBtt.setOnClickListener {
+                    toggleTracksOverlay(show = false)
+                }
+
+                binding.applyBtt.setOnClickListener {
+                    val currentTrack = currentAudioTracks.getOrNull(audioIndexStart)
+                    player.setPreferredAudioTrack(
+                        currentTrack?.language,
+                        currentTrack?.id,
+                        currentTrack?.formatIndex,
+                    )
+
+                    val currentVideo = currentVideoTracks.getOrNull(videoIndex)
+                    val width = currentVideo?.width ?: NO_VALUE
+                    val height = currentVideo?.height ?: NO_VALUE
+                    if (width != NO_VALUE && height != NO_VALUE) {
+                        player.setMaxVideoSize(width, height, currentVideo?.id)
+                    }
+                    toggleTracksOverlay(show = false)
                 }
             }
         } catch (e: Exception) {
@@ -2211,22 +2355,47 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     @MainThread
-    fun releasePlayer() {
-        player.release()
-        currentSelectedSubtitles = null
-        currentSelectedLink = null
-        isPlayerActive.set(false)
-        binding?.overlayLoadingSkipButton?.isVisible = false
-        binding?.playerLoadingOverlay?.isVisible = true
-        viewModel.modifyState { setError(emptyList()) }
-        uiReset()
-    }
+fun releasePlayer() {
+    player.release()
+    currentSelectedSubtitles = null
+    currentSelectedLink = null
+    isPlayerActive.set(false)
+    binding?.overlayLoadingSkipButton?.isVisible = false
+    binding?.playerLoadingOverlay?.isVisible = true
+    viewModel.modifyState { setError(emptyList()) }
+    uiReset()
+}
 
-    fun exitPlayer() {
-        playerHostView?.exitFullscreen()
-        player.release()
-        activity?.popCurrentPage()
-    }
+private fun releaseMediaNotification() {
+    cachedPlayerNotificationManager?.setPlayer(null)
+    cachedPlayerNotificationManager = null
+}
+
+fun exitPlayer() {
+    releaseMediaNotification()
+
+    mMediaSession?.release()
+    mMediaSession = null
+
+    playerHostView?.release()
+
+    player.release()
+    activity?.popCurrentPage()
+}
+
+fun closePlayerForActivityDestroy() {
+    releaseMediaNotification()
+
+    mMediaSession?.release()
+    mMediaSession = null
+
+    playerHostView?.release()
+
+    player.release()
+}
+
+
+
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("index", viewModel.episodeIndex)

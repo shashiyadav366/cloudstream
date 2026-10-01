@@ -105,3 +105,19 @@ fun OkHttpClient.Builder.addCanadianShieldDns() = (
                 "149.112.122.10",
             )
         ))
+
+fun OkHttpClient.Builder.addDnsOverTls(serverName: String) = dns(DnsOverTls(serverName))
+
+fun OkHttpClient.Builder.addGoogleDnsTls() = addDnsOverTls("dns.google")
+
+fun OkHttpClient.Builder.addCloudFlareDnsTls() = addDnsOverTls("one.one.one.one")
+
+fun OkHttpClient.Builder.addAdGuardDnsTls() = addDnsOverTls("dns.adguard-dns.com")
+
+fun OkHttpClient.Builder.addDNSWatchDnsTls() = addDnsOverTls("resolver2.dns.watch")
+
+fun OkHttpClient.Builder.addQuad9DnsTls() = addDnsOverTls("dns.quad9.net")
+
+fun OkHttpClient.Builder.addDnsSbDnsTls() = addDnsOverTls("dot.sb")
+
+fun OkHttpClient.Builder.addCanadianShieldDnsTls() = addDnsOverTls("private.canadianshield.cira.ca")

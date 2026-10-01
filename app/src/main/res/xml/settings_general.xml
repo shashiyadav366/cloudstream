@@ -76,6 +76,12 @@
             android:summary="@string/jsdelivr_proxy_summary"
             android:title="@string/jsdelivr_proxy" />
 
+        <Preference
+            android:icon="@drawable/ic_baseline_block_24"
+            android:key="@string/blocked_links_key"
+            android:summary="@string/blocked_links_summary"
+            android:title="@string/blocked_links_title" />
+
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/pref_category_links">

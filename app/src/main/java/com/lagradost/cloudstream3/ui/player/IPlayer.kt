@@ -144,6 +144,11 @@ data class VideoEndedEvent(
     override val source: PlayerEventSource = PlayerEventSource.Player
 ) : PlayerEvent()
 
+data class PlaybackSpeedChangedEvent(
+    val speed: Float,
+    override val source: PlayerEventSource = PlayerEventSource.Player
+) : PlayerEvent()
+
 /** Used for torrent to pre-download a video before playing it */
 data class DownloadEvent(
     val downloadedBytes: Long,
@@ -207,6 +212,9 @@ const val EXTRA_CONTROL_TYPE = "control_type"
 
 /** Abstract Exoplayer logic, can be expanded to other players */
 interface IPlayer {
+    /** Whether the currently loaded stream is a live stream. */
+    val isLiveStream: Boolean
+
     fun getPlaybackSpeed(): Float
     fun setPlaybackSpeed(speed: Float)
 
@@ -215,6 +223,9 @@ interface IPlayer {
     fun getDuration(): Long?
     /** Current player position in milliseconds */
     fun getPosition(): Long?
+
+    /** Current player volume, 0f means muted, 1f is max */
+    fun getVolume(): Float
 
     fun seekTime(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
     fun seekTo(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
@@ -267,6 +278,13 @@ interface IPlayer {
 
     /** Get if player is actually used */
     fun isActive(): Boolean
+
+    /**
+     * Whether the player has hit an unrecoverable playback error and can no longer
+     * render video. Used to avoid entering PiP mode (which would only show a black
+     * screen) for a broken video.
+     */
+    fun hasFatalError(): Boolean
 
     fun getVideoTracks(): CurrentTracks
 

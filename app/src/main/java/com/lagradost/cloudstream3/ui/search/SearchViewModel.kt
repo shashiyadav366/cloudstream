@@ -17,6 +17,7 @@ import com.lagradost.cloudstream3.mvvm.debugWarning
 import com.lagradost.cloudstream3.mvvm.launchSafe
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.home.HomeViewModel
+import com.lagradost.cloudstream3.plugins.RepositoryManager.getProviderLabel
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.DataStoreHelper.currentAccount
 import kotlinx.coroutines.Dispatchers
@@ -124,7 +125,7 @@ class SearchViewModel : ViewModel() {
     suspend fun expandAndReturn(name: String): HomeViewModel.ExpandableHomepageList? {
         if (lock.contains(name)) return null
         val query = lastQuery ?: return null
-        val repo = repos.find { it.name == name } ?: return null
+        val repo = repos.find { it.api.getProviderLabel() == name } ?: return null
 
         lock += name
 
@@ -236,7 +237,7 @@ class SearchViewModel : ViewModel() {
                     if (currentSearchIndex != currentIndex) return@amap
                     if (search is Resource.Success) {
                         val searchValue = search.value
-                        expandableSearches[a.name] =
+                        expandableSearches[a.api.getProviderLabel()] =
                             ExpandableSearchList(searchValue.items, 1, searchValue.hasNext)
                     }
 
