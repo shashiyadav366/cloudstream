@@ -38,6 +38,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -810,17 +811,19 @@ class CS3IPlayer : IPlayer {
             link: ExtractorLink,
             engine: CronetEngine?,
             interceptor: Interceptor?,
-        ): HttpDataSource.Factory {
-            val userAgent = link.headers.entries.find {
-                it.key.equals("User-Agent", ignoreCase = true)
-            }?.value ?: USER_AGENT
+        ): DataSource.Factory {
+            val requestContext = StreamRequestContext.from(link)
+            val userAgent = requestContext.userAgent ?: USER_AGENT
 
-            val source = if (interceptor == null) {
+            val source: HttpDataSource.Factory = if (interceptor == null) {
                 if (engine == null) {
-                    Log.d(TAG, "Using DefaultHttpDataSource for $link")
-                    OkHttpDataSource.Factory(app.baseClient).setUserAgent(userAgent)
+                    Log.d(TAG, "Using OkHttpDataSource for ${StreamRequestContext.safeTarget(link.url)}")
+                    OkHttpDataSource.Factory(
+                        if (STREAM_REQUEST_DEBUG_LOGS) attachStreamHttpLogging(app.baseClient)
+                        else app.baseClient
+                    ).setUserAgent(userAgent)
                 } else {
-                    Log.d(TAG, "Using CronetDataSource for $link")
+                    Log.d(TAG, "Using CronetDataSource for ${StreamRequestContext.safeTarget(link.url)}")
                     CronetDataSource.Factory(engine, Executors.newSingleThreadExecutor())
                         .setUserAgent(userAgent)
                         .setConnectionTimeoutMs(CRONET_TIMEOUT_MS)
@@ -829,24 +832,25 @@ class CS3IPlayer : IPlayer {
                         .setHandleSetCookieRequests(true)
                 }
             } else {
-                Log.d(TAG, "Using OkHttpDataSource for $link")
+                Log.d(TAG, "Using OkHttpDataSource for ${StreamRequestContext.safeTarget(link.url)}")
                 val client = app.baseClient.newBuilder()
                     .addInterceptor(interceptor)
                     .build()
-                OkHttpDataSource.Factory(client).setUserAgent(userAgent)
+                OkHttpDataSource.Factory(
+                    if (STREAM_REQUEST_DEBUG_LOGS) attachStreamHttpLogging(client) else client
+                ).setUserAgent(userAgent)
             }
 
-            // Do no include empty referer, if the provider wants those they can use the header map.
-            val refererMap =
-                if (link.referer.isBlank()) emptyMap() else mapOf("referer" to link.referer)
+            // Provider-supplied defaults for plain loads (e.g. subtitles go through
+            // createOnlineSource, this factory is only used for the media stream).
+            // Adds the headers from the provider, e.g Authorization.
+            source.setDefaultRequestProperties(requestContext.headers)
 
-            // These are extra headers the browser like to insert, not sure if we want to include them
-            // for WIDEVINE/drm as well? Do that if someone gets 404 and creates an issue.
-            val headers = refererMap + link.headers // Adds the headers from the provider, e.g Authorization
-
-            return source.apply {
-                setDefaultRequestProperties(headers)
-            }
+            // Stream-scoped request context: applied to every request the Media3 HLS
+            // lifecycle makes (playlists, refreshes, segments, keys) so provider headers
+            // survive redirect and playlist-derived DataSpecs instead of only covering
+            // the initial request. Per-DataSpec headers still win over this context.
+            return ResolvingDataSource.Factory(source, createStreamRequestResolver(requestContext))
         }
 
         private fun Context.createOfflineSource(): DataSource.Factory {
@@ -1089,7 +1093,7 @@ class CS3IPlayer : IPlayer {
         subtitleOffset: Long,
         cacheSize: Long,
         videoBufferMs: Long,
-        onlineSource: HttpDataSource.Factory? = null,
+        onlineSource: DataSource.Factory? = null,
         playWhenReady: Boolean = true,
         trackSelector: TrackSelector? = null,
         /**
@@ -1457,7 +1461,7 @@ return exoPlayerBuilder.build().apply {
         mediaSlices: List<MediaItemSlice>,
         subSources: List<SingleSampleMediaSource>,
         audioSources: List<MediaSource> = emptyList(),
-        onlineSource: HttpDataSource.Factory? = null,
+        onlineSource: DataSource.Factory? = null,
     ) {
         Log.i(TAG, "loadExo")
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
@@ -1888,7 +1892,7 @@ return exoPlayerBuilder.build().apply {
     @SuppressLint("UnsafeOptInUsageError")
     @MainThread
     private fun loadOnlinePlayer(context: Context, link: ExtractorLink, retry: Boolean = false) {
-        Log.i(TAG, "loadOnlinePlayer $link")
+        Log.i(TAG, "loadOnlinePlayer name=${link.name} target=${StreamRequestContext.safeTarget(link.url)}")
         try {
             val mime = when (link.type) {
                 ExtractorLinkType.M3U8 -> MimeTypes.APPLICATION_M3U8

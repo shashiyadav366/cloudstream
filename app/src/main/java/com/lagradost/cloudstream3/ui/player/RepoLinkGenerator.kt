@@ -110,7 +110,7 @@ class RepoLinkGenerator(
             current.data,
             isCasting = isCasting,
             subtitleCallback = { file ->
-                Log.d(TAG, "Loaded SubtitleFile: $file")
+                Log.d(TAG, "Loaded SubtitleFile lang=${file.lang}")
                 val correctFile = PlayerSubtitleHelper.getSubtitleData(file)
                 if (correctFile.url.isBlank() || !currentSubsUrls.add(correctFile.url)) {
                     return@loadLinks
@@ -133,7 +133,7 @@ class RepoLinkGenerator(
                 }
             },
             callback = { link ->
-                Log.d(TAG, "Loaded ExtractorLink: $link")
+                Log.d(TAG, "Loaded ExtractorLink name=${link.name} target=${StreamRequestContext.safeTarget(link.url)}")
                 if (link.url.isBlank() || !currentLinksUrls.add(link.url)) {
                     return@loadLinks
                 }

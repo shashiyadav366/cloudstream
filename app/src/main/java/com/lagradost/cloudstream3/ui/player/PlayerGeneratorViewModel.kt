@@ -30,6 +30,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.Contract
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 typealias VideoLink = Pair<ExtractorLink?, ExtractorUri?>
 
@@ -314,6 +315,34 @@ class PlayerGeneratorViewModel : ViewModel() {
     fun loadThisEpisode(index: Int) {
         episodeIndex = index
         loadLinks()
+    }
+
+    /**
+     * Re-resolves the current episode's links through the provider, bypassing all local
+     * caches (including [RepoLinkGenerator]'s link cache). Used for legitimate
+     * re-resolution when an authorized stream expires mid-playback.
+     *
+     * Returns the freshly resolved links without touching [state] — the caller decides
+     * which link to adopt. Empty when the generator cannot resolve.
+     */
+    suspend fun regenerateLinks(): List<ExtractorLink> {
+        val gen = generator ?: return emptyList()
+        val index = episodeIndex
+        val fresh = CopyOnWriteArrayList<ExtractorLink>()
+        return try {
+            gen.generateLinks(
+                sourceTypes = LOADTYPE_INAPP,
+                clearCache = true,
+                callback = { (link, _) -> if (link != null) fresh.add(link) },
+                subtitleCallback = {},
+                offset = index,
+                isCasting = false,
+            )
+            fresh.toList()
+        } catch (t: Throwable) {
+            logError(t)
+            emptyList()
+        }
     }
 
     fun attachGenerator(newGenerator: VideoGenerator<*>, index: Int) {

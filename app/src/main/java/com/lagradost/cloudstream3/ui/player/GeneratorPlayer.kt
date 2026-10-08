@@ -182,6 +182,12 @@ class GeneratorPlayer : FullScreenPlayer() {
     private lateinit var sync: SyncViewModel
 
     private var currentSelectedLink: Pair<ExtractorLink?, ExtractorUri?>? = null
+    /** In-flight re-resolution of an expired authorized stream; cancelled in onDestroy. */
+    private var streamRenewalJob: Job? = null
+    /** Bounds how often automatic re-resolution may start (no error/renewal loops). */
+    private val streamRenewalBudget = StreamRenewalBudget()
+    /** Exponential-backoff re-prepare budget for transient playback errors (reference-player tier 1). */
+    private val prepareRetryPolicy = PrepareRetryPolicy()
     private var currentSelectedSubtitles: SubtitleData? = null
     private val currentMeta: Any? get() = viewModel.state.generatorState?.meta
     private val nextMeta: Any? get() = viewModel.state.generatorState?.nextMeta
@@ -240,6 +246,9 @@ class GeneratorPlayer : FullScreenPlayer() {
         super.playerStatusChanged()
         if (player.getIsPlaying()) {
             viewModel.forceClearCache = false
+            // Reference-player tier 1 gate: playback proved it can render, so the
+            // prepare-retry budget re-opens and the attempt count resets.
+            prepareRetryPolicy.markPlaybackHealthy()
         }
     }
 
@@ -1707,20 +1716,125 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     override fun playerError(exception: Throwable) {
+        val errorKind = StreamPlaybackErrors.classify(exception)
+        val activeLink = currentSelectedLink?.first
+
+        if (activeLink != null && errorKind == StreamErrorKind.AuthorizationExpired) {
+            // The authorization on this stream URL ran out: re-resolve the stream through
+            // the provider (legitimate, cache-bypassing) instead of surfacing the error.
+            // While re-resolution runs, further errors are swallowed — the fresh load will
+            // either succeed or produce its own final error.
+            if (streamRenewalJob?.isActive == true) {
+                Log.i(TAG, "playerError: authorization expired during re-resolution, ignoring")
+                return
+            }
+            if (streamRenewalBudget.tryBeginAttempt(activeLink.url)) {
+                Log.i(TAG, "playerError: authorization expired, re-resolving stream from provider")
+                startAuthorizationRenewal(activeLink, exception)
+                return
+            }
+            Log.i(TAG, "playerError: re-resolution budget exhausted, surfacing error")
+        } else if (
+            errorKind != StreamErrorKind.Cancelled &&
+            errorKind != StreamErrorKind.AuthorizationExpired &&
+            prepareRetryPolicy.shouldRetry()
+        ) {
+            // Reference-player tier 1: re-prepare the same URL with the same headers and
+            // an exponential backoff instead of surfacing. Re-requesting the playlists is
+            // what picks up fresh live-segment state. Authorization-expired errors are
+            // excluded (handled above): re-preparing a dead URL cannot fix them, and
+            // cancellation is excluded so link switches are never fought.
+            val attempt = prepareRetryPolicy.recordRetry()
+            Log.i(
+                TAG,
+                "playerError: transient failure, exp-backoff prepare() retry " +
+                        "$attempt/${PrepareRetryPolicy.MAX_RETRIES}"
+            )
+            player.handleEvent(CSPlayerEvent.Play, PlayerEventSource.Player)
+            return
+        }
+
+        handlePlayerError(exception)
+    }
+
+    /**
+     * Re-resolves the current episode's links from the provider (clearing local caches),
+     * picks a fresh variant of the expired link and reloads it through the normal
+     * [loadLink] path — no player restarts, no global header changes.
+     */
+    private fun startAuthorizationRenewal(current: ExtractorLink, error: Throwable) {
+        // Captured on the main thread before regeneration; playerError is always main.
+        val previousLink = currentSelectedLink
+
+        streamRenewalJob = ioSafe {
+            val freshLink = try {
+                val candidates = viewModel.regenerateLinks()
+                StreamLinkRenewal.pickFreshCandidate(current, candidates)
+            } catch (t: Throwable) {
+                logError(t)
+                null
+            }
+
+            if (!isAdded) return@ioSafe
+
+            if (freshLink == null) {
+                Log.i(TAG, "stream re-resolution returned no fresh authorized link, surfacing original error")
+                runOnMainThread {
+                    if (isAdded) handlePlayerError(error)
+                }
+                return@ioSafe
+            }
+
+            streamRenewalBudget.recordRenewed(freshLink.url)
+            Log.i(
+                TAG,
+                "stream re-resolved, reloading with fresh authorization " +
+                        "target=${StreamRequestContext.safeTarget(freshLink.url)}"
+            )
+
+            runOnMainThread {
+                if (!isAdded) return@runOnMainThread
+                // The user may have switched links while we were regenerating; never
+                // hijack a user-initiated action.
+                if (currentSelectedLink !== previousLink) {
+                    Log.i(TAG, "stream re-resolution finished but the link changed, discarding")
+                    return@runOnMainThread
+                }
+
+                val freshPair: VideoLink = freshLink to null
+                previousLink?.let { oldPair ->
+                    if (oldPair !== freshPair) {
+                        viewModel.modifyState { addError(oldPair) }
+                    }
+                }
+                viewModel.modifyState { add(freshPair) }
+                loadLink(freshPair, sameEpisode = true)
+            }
+        }
+    }
+
+    /** The original error handling path: mark the link errored, log, surface to the UI. */
+    private fun handlePlayerError(exception: Throwable) {
         currentSelectedLink?.let { link ->
             viewModel.modifyState { this.addError(link) }
         }
 
         val currentUrl =
             currentSelectedLink?.let { it.first?.url ?: it.second?.uri?.toString() } ?: "unknown"
-        val headers = currentSelectedLink?.first?.headers?.toString() ?: "none"
-        val referer = currentSelectedLink?.first?.referer ?: "none"
+        // Log header names and query-less targets only, never signed URLs or header values.
+        val headerNames = currentSelectedLink?.first?.headers?.keys ?: emptySet()
+        val referer = currentSelectedLink?.first?.referer
         Log.e(
             TAG,
-            "playerError: $currentSelectedLink, " +
+            "playerError: name=${currentSelectedLink?.first?.name}, " +
                     "type=${exception::class.qualifiedName}, " +
-                    "message=${exception.message}, url=$currentUrl, headers=$headers, " +
-                    "referer=$referer, position=${player.getPosition() ?: "unknown"}, " +
+                    "kind=${StreamPlaybackErrors.classify(exception)}, " +
+                    "httpStatus=${StreamPlaybackErrors.httpStatus(exception)}, " +
+                    "message=${StreamRequestContext.redactUrls(exception.message)}, " +
+                    "target=${StreamRequestContext.safeTarget(currentUrl)}, " +
+                    "headerNames=$headerNames, " +
+                    "referer=${referer?.let { StreamRequestContext.safeTarget(it) } ?: "none"}, " +
+                    "position=${player.getPosition() ?: "unknown"}, " +
                     "duration=${player.getDuration() ?: "unknown"}, " +
                     "isPlaying=${player.getIsPlaying()}", exception
         )
@@ -1861,6 +1975,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     override fun onDestroy() {
         ResultFragment.updateUI()
         currentVerifyLink?.cancel()
+        streamRenewalJob?.cancel()
         super.onDestroy()
     }
 
