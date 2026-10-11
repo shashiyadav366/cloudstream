@@ -21,6 +21,7 @@ import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.getFold
 import com.lagradost.cloudstream3.ui.subtitles.ChromecastSubtitlesFragment
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream4.compose.EMULATOR
 import com.lagradost.cloudstream4.compose.PHONE
 import com.lagradost.cloudstream4.compose.TV
@@ -90,6 +91,20 @@ object SettingsPlayerScreen : SearchableSettings {
                         entries = players,
                     ),
 
+                    Preference.PreferenceItem.ListPreference(
+                        title = stringResource(R.string.max_video_quality),
+                        subtitle = stringResource(R.string.max_video_quality_des),
+                        icon = painterResource(R.drawable.high_res_24px),
+                        preference = settings.player.maxVideoHeight,
+                        entries = buildMap {
+                            put(0, stringResource(R.string.automatic))
+                            Qualities.entries
+                                .filter { it != Qualities.Unknown }
+                                .sortedByDescending { it.value }
+                                .forEach { put(it.value, Qualities.getStringByInt(it.value)) }
+                        },
+                    ),
+
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(R.string.source_priority),
                         subtitle = stringResource(R.string.source_priority_help),
@@ -126,6 +141,13 @@ object SettingsPlayerScreen : SearchableSettings {
                         preference = settings.player.speedEnabled,
                         title = stringResource(R.string.eigengraumode_settings),
                         subtitle = stringResource(R.string.speed_setting_summary),
+                        icon = painterResource(R.drawable.ic_baseline_speed_24),
+                    ),
+
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = settings.player.rememberSpeedEnabled,
+                        title = stringResource(R.string.remember_speed_settings),
+                        subtitle = stringResource(R.string.remember_speed_settings_des),
                         icon = painterResource(R.drawable.ic_baseline_speed_24),
                     ),
 

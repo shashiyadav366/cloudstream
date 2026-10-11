@@ -1143,7 +1143,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                 fun refreshLinks(qualityProfile: Int) {
                     val currentLinkUsed = currentSelectedLink
                     // Always display current linkFooter
-                    val sortedLinks = viewModel.state.sortLinks(qualityProfile)
+                    val sortedLinks = viewModel.state.sortLinks(
+                        qualityProfile,
+                        context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+                    )
 
                     filteredLinks = sortedLinks.filter { it.shouldUseLink || it.link == currentLinkUsed }
 
@@ -1847,7 +1850,10 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     private fun noLinksFound() {
         viewModel.forceClearCache = true
-        val hiddenLinks = viewModel.state.sortLinks(currentQualityProfile).count { !it.shouldUseLink }
+        val hiddenLinks = viewModel.state.sortLinks(
+            currentQualityProfile,
+            context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+        ).count { !it.shouldUseLink }
 
         context?.let { ctx ->
             // Display that there are hidden links to the user.
@@ -1872,9 +1878,16 @@ class GeneratorPlayer : FullScreenPlayer() {
             return
         }
 
-        val links = viewModel.state.sortLinks(currentQualityProfile)
+        val maxVideoHeight = context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+        val links = viewModel.state.sortLinks(currentQualityProfile, maxVideoHeight)
 
-        val firstAvailableLink = links.firstOrNull { it.shouldUseLink }?.link
+        // The maximum resolution caps the default link (e.g. auto-play at 720p), but links
+        // above it stay visible and selectable so the user can switch to 1080p if wanted.
+        val firstAvailableLink = (links.firstOrNull {
+            it.shouldUseLink && it.link.first?.quality?.let { quality ->
+                maxVideoHeight >= Int.MAX_VALUE || quality <= maxVideoHeight
+            } ?: true
+        } ?: links.firstOrNull { it.shouldUseLink })?.link
         if (firstAvailableLink == null) {
             noLinksFound()
             return
@@ -1951,7 +1964,10 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun getNextLink(): DisplayLink? {
-        val links = viewModel.state.sortLinks(currentQualityProfile)
+        val links = viewModel.state.sortLinks(
+            currentQualityProfile,
+            context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+        )
         val currentIndex = links.indexOfFirst { it.link == currentSelectedLink }
         val nextPotentialLink =
             links.withIndex().firstOrNull { it.index > currentIndex && it.value.shouldUseLink }
@@ -2645,7 +2661,10 @@ fun closePlayerForActivityDestroy() {
         observe(viewModel.currentLinks) { (_, instance) ->
             if (instance != viewModel.state.instance) return@observe // Outdated observe
 
-            val sortedLinks = viewModel.state.sortLinks(currentQualityProfile)
+            val sortedLinks = viewModel.state.sortLinks(
+                currentQualityProfile,
+                context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+            )
             val usableLinks = sortedLinks.count { link -> link.shouldUseLink }
 
             val turnVisible = usableLinks > 0 && viewModel.generator?.canSkipLoading == true

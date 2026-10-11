@@ -148,6 +148,19 @@ object PluginManager {
         }
     }
 
+    /**
+     * Deletes the external local plugins folder (/Cloudstream3/plugins) and the copies
+     * the app made in its own external files folder. Returns true when the folder is gone.
+     */
+    fun deleteLocalPluginsFolder(): Boolean {
+        return try {
+            File(LOCAL_PLUGINS_PATH).deleteRecursively()
+        } catch (t: Throwable) {
+            logError(t)
+            false
+        }
+    }
+
     suspend fun deleteRepositoryData(repositoryPath: String) {
         lock.withLock {
             val plugins = getPluginsOnline().filter {

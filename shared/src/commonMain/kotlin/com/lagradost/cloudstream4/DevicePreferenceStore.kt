@@ -20,10 +20,13 @@ expect fun rememberAppSettings(): AppSettings
  * */
 class AppSettings internal constructor(
     preferences: PreferenceStore,
+    // Default maximum video height, 0 means no limit. Used to cap playback on devices that
+    // cannot handle high resolutions (e.g. 4K on older TVs).
+    defaultMaxVideoHeight: Int = 0,
     // Todo add database key-value interface here, possibly using the same PreferenceStore interface
 ) {
     val general = GeneralPreferences(preferences)
-    val player = PlayerPreferences(preferences)
+    val player = PlayerPreferences(preferences, defaultMaxVideoHeight)
     val provider = ProviderPreferences(preferences)
     val ui = UIPreferences(preferences)
     val security = SecurityPreferences(preferences)
@@ -157,9 +160,15 @@ class ProviderPreferences(preferences: PreferenceStore) {
     )
 }
 
-class PlayerPreferences(preferences: PreferenceStore) {
+class PlayerPreferences(
+    preferences: PreferenceStore,
+    defaultMaxVideoHeight: Int = 0,
+) {
     val episodeSync = preferences.getBoolean("episode_sync_enabled_key", true)
     val defaultPlayer = preferences.getString("player_default_key", "")
+    val maxVideoHeight = preferences.getInt("quality_pref_key", defaultMaxVideoHeight)
+    val maxVideoHeightMobileData =
+        preferences.getInt("quality_pref_mobile_data_key", defaultMaxVideoHeight)
     val limitPlayerTitle = preferences.getInt("prefer_limit_title_key", 0)
     val hidePlayerControlNames = preferences.getBoolean("hide_player_control_names_key", false)
     val showName = preferences.getBoolean("show_name", true)
@@ -168,6 +177,7 @@ class PlayerPreferences(preferences: PreferenceStore) {
     val pipEnabled = preferences.getBoolean("pip_enabled_key", true)
     val resizeEnabled = preferences.getBoolean("player_resize_enabled_key", true)
     val speedEnabled = preferences.getBoolean("playback_speed_enabled_key", false)
+    val rememberSpeedEnabled = preferences.getBoolean("remember_speed_enabled_key", false)
     val compressorEnabled = preferences.getBoolean("compressor_enabled_key", false)
     val tiktokEnabled = preferences.getBoolean("speedup_key", false)
     val autoPlayEnabled = preferences.getBoolean("autoplay_next_key", true)

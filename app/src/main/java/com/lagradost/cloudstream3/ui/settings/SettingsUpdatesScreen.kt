@@ -14,9 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,15 +44,20 @@ import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream3.utils.BackupUtils.restoreFromPath
 import com.lagradost.cloudstream3.utils.BackupUtils.restorePrompt
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
+import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.InAppUpdater.installPreReleaseIfNeeded
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream4.AppSettings
+import com.lagradost.cloudstream4.compose.ActionDialog
+import com.lagradost.cloudstream4.compose.BlackButton
+import com.lagradost.cloudstream4.compose.WhiteButton
 import com.lagradost.cloudstream4.rememberAppSettings
 import com.lagradost.safefile.SafeFile
 import com.mihon.presentation.settings.Preference
 import com.mihon.presentation.settings.SearchableSettings
 import com.mihon.presentation.settings.collectAsState
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toPersistentList
 
 object SettingsUpdatesScreen : SearchableSettings {
     @Composable
@@ -92,9 +97,13 @@ object SettingsUpdatesScreen : SearchableSettings {
 
         val visualBackupPath by settings.backup.visualPath.collectAsState()
         val backupUrl by settings.backup.url.collectAsState()
+        val backupDestination by settings.backup.destination.collectAsState()
+        val isPathUrlDestination =
+            backupDestination == BackupUtils.BACKUP_DESTINATION_PATH_URL
         var showDialog by remember { mutableStateOf(false) }
         var showBackupPathDialog by remember { mutableStateOf(false) }
         var showGitHubTokenDialog by remember { mutableStateOf(false) }
+        var showResetDialog by remember { mutableStateOf(false) }
         var pendingBackupAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
         if (showDialog) {
@@ -108,6 +117,7 @@ object SettingsUpdatesScreen : SearchableSettings {
             var value by remember { mutableStateOf(current) }
             AlertDialog(
                 onDismissRequest = { showBackupPathDialog = false },
+                containerColor = MaterialTheme.colorScheme.background,
                 title = { Text(stringResource(R.string.backup_path_or_url_title)) },
                 text = {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -121,7 +131,7 @@ object SettingsUpdatesScreen : SearchableSettings {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    WhiteButton(text = stringResource(R.string.ok), onClick = {
                         val trimmed = value.trim()
                         if (trimmed.isBlank()) {
                             showToast(R.string.backup_path_empty, Toast.LENGTH_SHORT)
@@ -131,13 +141,13 @@ object SettingsUpdatesScreen : SearchableSettings {
                             pendingBackupAction?.invoke()
                             pendingBackupAction = null
                         }
-                    }) { Text(stringResource(R.string.ok)) }
+                    })
                 },
                 dismissButton = {
-                    TextButton(onClick = {
+                    BlackButton(text = stringResource(R.string.cancel), onClick = {
                         showBackupPathDialog = false
                         pendingBackupAction = null
-                    }) { Text(stringResource(R.string.cancel)) }
+                    })
                 }
             )
         }
@@ -148,6 +158,7 @@ object SettingsUpdatesScreen : SearchableSettings {
             var value by remember { mutableStateOf(current) }
             AlertDialog(
                 onDismissRequest = { showGitHubTokenDialog = false },
+                containerColor = MaterialTheme.colorScheme.background,
                 title = { Text(stringResource(R.string.github_token_title)) },
                 text = {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -162,7 +173,7 @@ object SettingsUpdatesScreen : SearchableSettings {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    WhiteButton(text = stringResource(R.string.ok), onClick = {
                         val trimmed = value.trim()
                         if (trimmed.isBlank()) {
                             showToast(R.string.github_token_empty, Toast.LENGTH_SHORT)
@@ -172,13 +183,31 @@ object SettingsUpdatesScreen : SearchableSettings {
                             pendingBackupAction?.invoke()
                             pendingBackupAction = null
                         }
-                    }) { Text(stringResource(R.string.ok)) }
+                    })
                 },
                 dismissButton = {
-                    TextButton(onClick = {
+                    BlackButton(text = stringResource(R.string.cancel), onClick = {
                         showGitHubTokenDialog = false
                         pendingBackupAction = null
-                    }) { Text(stringResource(R.string.cancel)) }
+                    })
+                }
+            )
+        }
+
+        if (showResetDialog) {
+            ActionDialog(
+                title = stringResource(R.string.reset_app_title),
+                text = stringResource(R.string.reset_app_confirm_message),
+                confirmText = stringResource(R.string.reset_btn),
+                dismissText = stringResource(R.string.cancel),
+                dismiss = { showResetDialog = false },
+                confirm = {
+                    showResetDialog = false
+                    val context = CloudStreamApp.context ?: return@ActionDialog
+                    ioSafe {
+                        BackupUtils.factoryReset(context)
+                        main { BackupUtils.restartApp(context) }
+                    }
                 }
             )
         }
@@ -276,68 +305,98 @@ object SettingsUpdatesScreen : SearchableSettings {
             ),
             Preference.PreferenceGroup(
                 title = stringResource(R.string.pref_category_backup),
-                preferenceItems = persistentListOf(
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(R.string.backup_settings),
-                        icon = painterResource(R.drawable.save_as_24px),
-                        onClick = {
-                            runBackup()
-                        }
-                    ),
-                    Preference.PreferenceItem.ListPreference(
-                        title = stringResource(R.string.backup_destination_title),
-                        icon = painterResource(R.drawable.ic_baseline_cloud_upload_24),
-                        entries = persistentListOf(
-                            BackupUtils.BACKUP_DESTINATION_LOCAL to stringResource(R.string.backup_destination_local),
-                            BackupUtils.BACKUP_DESTINATION_PATH_URL to stringResource(R.string.backup_destination_path_url),
-                        ).toMap(),
-                        subtitleProvider = { v, e -> e[v] },
-                        preference = settings.backup.destination,
-                    ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(R.string.backup_path_or_url_title),
-                        icon = painterResource(R.drawable.ic_baseline_link_24),
-                        subtitle = backupUrl.takeIf { it.isNotBlank() }
-                            ?: stringResource(R.string.backup_destination_path_url),
-                        onClick = {
-                            showBackupPathDialog = true
-                        }
-                    ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(R.string.github_token_title),
-                        subtitle = stringResource(R.string.github_token_summary),
-                        icon = painterResource(R.drawable.ic_baseline_vpn_key_24),
-                        onClick = {
-                            showGitHubTokenDialog = true
-                        }
-                    ),
-                    Preference.PreferenceItem.ListPreference(
-                        title = stringResource(R.string.backup_frequency),
-                        icon = painterResource(R.drawable.save_clock_24px),
-                        entries = integerArrayResource(R.array.periodic_work_values).zip(
-                            stringArrayResource(R.array.periodic_work_names)
-                        ).toMap(),
-                        preference = settings.backup.frequency
-                    ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(R.string.backup_path_title),
-                        icon = painterResource(R.drawable.folder_24px),
-                        subtitle = visualBackupPath,
-                        onClick = {
-                            // This is not a ListPreference because the old selection system is
-                            // broken af. This needs to be refactored to QuickNovels download path
-                            // system.
-                            selectFileSelector.launch(Uri.EMPTY)
-                        }
-                    ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(R.string.restore_settings),
-                        icon = painterResource(R.drawable.restore_page_24px),
-                        onClick = {
-                            runRestore()
-                        }
-                    ),
-                )
+                preferenceItems = buildList<Preference.PreferenceItem<out Any?, out Any?>> {
+                    add(
+                        Preference.PreferenceItem.TextPreference(
+                            title = stringResource(R.string.backup_settings),
+                            icon = painterResource(R.drawable.save_as_24px),
+                            onClick = {
+                                runBackup()
+                            }
+                        )
+                    )
+                    add(
+                        Preference.PreferenceItem.ListPreference(
+                            title = stringResource(R.string.backup_destination_title),
+                            icon = painterResource(R.drawable.ic_baseline_cloud_upload_24),
+                            entries = persistentListOf(
+                                BackupUtils.BACKUP_DESTINATION_LOCAL to stringResource(R.string.backup_destination_local),
+                                BackupUtils.BACKUP_DESTINATION_PATH_URL to stringResource(R.string.backup_destination_path_url),
+                            ).toMap(),
+                            subtitleProvider = { v, e -> e[v] },
+                            preference = settings.backup.destination,
+                        )
+                    )
+                    // Path/URL and GitHub token only apply to the Path/URL destination.
+                    if (isPathUrlDestination) {
+                        add(
+                            Preference.PreferenceItem.TextPreference(
+                                title = stringResource(R.string.backup_path_or_url_title),
+                                icon = painterResource(R.drawable.ic_baseline_link_24),
+                                subtitle = backupUrl.takeIf { it.isNotBlank() }
+                                    ?: stringResource(R.string.backup_destination_path_url),
+                                onClick = {
+                                    showBackupPathDialog = true
+                                }
+                            )
+                        )
+                        add(
+                            Preference.PreferenceItem.TextPreference(
+                                title = stringResource(R.string.github_token_title),
+                                subtitle = stringResource(R.string.github_token_summary),
+                                icon = painterResource(R.drawable.ic_baseline_vpn_key_24),
+                                onClick = {
+                                    showGitHubTokenDialog = true
+                                }
+                            )
+                        )
+                    }
+                    add(
+                        Preference.PreferenceItem.ListPreference(
+                            title = stringResource(R.string.backup_frequency),
+                            icon = painterResource(R.drawable.save_clock_24px),
+                            entries = integerArrayResource(R.array.periodic_work_values).zip(
+                                stringArrayResource(R.array.periodic_work_names)
+                            ).toMap(),
+                            preference = settings.backup.frequency
+                        )
+                    )
+                    // The local folder picker only applies to the Local destination.
+                    if (!isPathUrlDestination) {
+                        add(
+                            Preference.PreferenceItem.TextPreference(
+                                title = stringResource(R.string.backup_path_title),
+                                icon = painterResource(R.drawable.folder_24px),
+                                subtitle = visualBackupPath,
+                                onClick = {
+                                    // This is not a ListPreference because the old selection system is
+                                    // broken af. This needs to be refactored to QuickNovels download path
+                                    // system.
+                                    selectFileSelector.launch(Uri.EMPTY)
+                                }
+                            )
+                        )
+                    }
+                    add(
+                        Preference.PreferenceItem.TextPreference(
+                            title = stringResource(R.string.restore_settings),
+                            icon = painterResource(R.drawable.restore_page_24px),
+                            onClick = {
+                                runRestore()
+                            }
+                        )
+                    )
+                    add(
+                        Preference.PreferenceItem.TextPreference(
+                            title = stringResource(R.string.reset_app_title),
+                            subtitle = stringResource(R.string.reset_app_summary),
+                            icon = painterResource(R.drawable.ic_baseline_restart_24),
+                            onClick = {
+                                showResetDialog = true
+                            }
+                        )
+                    )
+                }.toPersistentList()
             ),
             Preference.PreferenceGroup(
                 title = stringResource(R.string.pref_category_extensions),

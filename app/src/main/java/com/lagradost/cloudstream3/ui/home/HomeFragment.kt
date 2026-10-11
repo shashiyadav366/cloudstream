@@ -6,13 +6,17 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextWatcher
 import android.text.style.RelativeSizeSpan
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.AbsListView
 import android.widget.ArrayAdapter
@@ -635,25 +639,78 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                     arrayAdapter.addAll(names)
                     arrayAdapter.notifyDataSetChanged()
                 }
-                // pin provider on hold
-                listView?.setOnItemLongClickListener { _, _, i, _ ->
-                    if (currentValidApis.isNotEmpty() && i > 1) {
-                        val pinnedp = DataStoreHelper.pinnedProviders.toMutableList()
-                        val thisapi = currentValidApis[i]
-                        val pinKey = DataStoreHelper.getProviderPinKey(thisapi.name, thisapi.sourcePlugin)
-                        if (pinnedp.contains(pinKey)) {
-                            pinnedp.remove(pinKey)
-                        } else {
-                            // Replace any legacy name-only pin with the name+source key so
-                            // only this provider is pinned and the other same-named
-                            // provider stays in the list (pin one "Moviebox" at a time).
-                            pinnedp.remove(thisapi.name)
-                            pinnedp.add(pinKey)
-                        }
-                        DataStoreHelper.pinnedProviders = pinnedp.toTypedArray()
-                        updateList()
+                fun togglePin(position: Int) {
+                    if (currentValidApis.isEmpty() || position <= 1 || position >= currentValidApis.size) {
+                        return
                     }
+                    val pinnedp = DataStoreHelper.pinnedProviders.toMutableList()
+                    val thisapi = currentValidApis[position]
+                    val pinKey = DataStoreHelper.getProviderPinKey(thisapi.name, thisapi.sourcePlugin)
+                    if (pinnedp.contains(pinKey)) {
+                        pinnedp.remove(pinKey)
+                    } else {
+                        // Replace any legacy name-only pin with the name+source key so
+                        // only this provider is pinned and the other same-named
+                        // provider stays in the list (pin one "Moviebox" at a time).
+                        pinnedp.remove(thisapi.name)
+                        pinnedp.add(pinKey)
+                    }
+                    DataStoreHelper.pinnedProviders = pinnedp.toTypedArray()
+                    updateList()
+                }
+
+                // pin provider on hold (phone)
+                listView?.setOnItemLongClickListener { _, _, i, _ ->
+                    togglePin(i)
                     true
+                }
+
+                // TV remotes cannot reliably deliver a ListView item long-click through the
+                // D-pad center/OK button, so emulate a long press to pin/unpin the highlighted
+                // provider while a short press still selects it. The framework's own key
+                // long-press is disabled here to avoid toggling the pin twice.
+                if (isLayout(TV or EMULATOR)) {
+                    listView?.isLongClickable = false
+                    val longPressHandler = Handler(Looper.getMainLooper())
+                    val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
+                    var longPressRunnable: Runnable? = null
+                    var longPressTriggered = false
+                    listView?.setOnKeyListener { _, keyCode, event ->
+                        if (keyCode != KeyEvent.KEYCODE_DPAD_CENTER &&
+                            keyCode != KeyEvent.KEYCODE_ENTER
+                        ) {
+                            return@setOnKeyListener false
+                        }
+                        when (event.action) {
+                            KeyEvent.ACTION_DOWN -> {
+                                if (event.repeatCount == 0) {
+                                    longPressTriggered = false
+                                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                                    val position = listView.selectedItemPosition
+                                    val runnable = Runnable {
+                                        longPressTriggered = true
+                                        togglePin(position)
+                                    }
+                                    longPressRunnable = runnable
+                                    longPressHandler.postDelayed(runnable, longPressTimeout)
+                                }
+                                false
+                            }
+
+                            KeyEvent.ACTION_UP -> {
+                                longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                                longPressRunnable = null
+                                if (longPressTriggered) {
+                                    longPressTriggered = false
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+
+                            else -> false
+                        }
+                    }
                 }
 
                 bindChips(
@@ -682,6 +739,41 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 binding.providerSearchInput.setOnFocusChangeListener { v, hasFocus ->
                     if (!hasFocus) {
                         hideKeyboard(v)
+                    }
+                }
+
+                // Move focus/selection from the search field onto the provider list,
+                // exactly like the on-screen keyboard's "Next" key does. The selector
+                // (focus border) lands on the first row ("None") while the check mark
+                // stays on the currently selected provider, and D-pad up/down then
+                // moves the selector across the other plugins. Deferred until the
+                // keyboard has hidden so the list can actually take focus.
+                fun focusProviderList() {
+                    hideKeyboard(binding.providerSearchInput)
+                    binding.listview1.post {
+                        binding.listview1.setSelection(0)
+                        binding.listview1.requestFocus()
+                    }
+                }
+
+                // The keyboard's Next/action key.
+                binding.providerSearchInput.setOnEditorActionListener { _, _, _ ->
+                    focusProviderList()
+                    true
+                }
+
+                // The remote Back button: while the search field is focused it should
+                // behave like Next (return to the list) instead of just dismissing the
+                // keyboard/dialog with nothing selected. Back from the list still closes.
+                builder.setOnKeyListener { _, keyCode, event ->
+                    if (keyCode == KeyEvent.KEYCODE_BACK &&
+                        binding.providerSearchInput.hasFocus() &&
+                        (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)
+                    ) {
+                        focusProviderList()
+                        true
+                    } else {
+                        false
                     }
                 }
 
@@ -905,8 +997,14 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                         val scrollParent = binding.homeApiHolder
 
                         if (view == null) {
-                            // The first view is not visible, so we can assume we have scrolled past it
-                            scrollParent.isVisible = false
+                            // The first view is not laid out. When the list has content this
+                            // means we scrolled past it, so hide the selector. But when the
+                            // list is empty (e.g. the "None" provider) there is nothing to
+                            // scroll past, so keep the selector visible and in place instead
+                            // of removing it.
+                            val hasContent = (recyclerView.adapter?.itemCount ?: 0) > 0
+                            scrollParent.isVisible = !hasContent
+                            if (!hasContent) scrollParent.translationY = 0f
                         } else {
                             // A bit weird, but this is a major limitation we are working around here
                             // 1. We cant have a real parent to the recyclerview as android cant layout that without lagging
@@ -1147,7 +1245,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             helper.runDefault()
             return
         }
+        // When the selected provider page is empty (e.g. "None") there is no
+        // focusable content, so currentFocus can be null. In that case recover
+        // onto the plugin selector instead of falling through to default Back.
         val currentFocus = activity?.currentFocus ?: run {
+            if (focusPluginSelector()) return
             helper.runDefault()
             return
         }
@@ -1165,10 +1267,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             // Case 1: Focus is within plugin content -> Move to plugin selector
             isInsideRecycler -> {
                 binding?.homeMasterRecycler?.scrollToPosition(0)
-                // Defer focus request until after scroll ends
-                binding?.homeChangeApi?.post {
-                    binding?.homeChangeApi?.requestFocus()
-                }
+                focusPluginSelector()
             }
             // Case 2: Focus is on plugin selector or nearby buttons -> Move to home navigation
             currentFocus.id == R.id.home_change_api ||
@@ -1179,5 +1278,28 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             // Case 3: Any other location -> Use default back behavior
             else -> helper.runDefault()
         }
+    }
+
+    /**
+     * Restores focus onto the plugin selector (home_change_api) so the focus
+     * selector/bar that lets the user reach the dropdown of all plugin options
+     * is visible again after Back. The selector is hidden while the header row
+     * is scrolled off screen and focusing a hidden/offscreen view fails, so make
+     * sure it is visible and reset its vertical mirror offset before focusing.
+     */
+    private fun focusPluginSelector(): Boolean {
+        val holder = binding?.homeApiHolder ?: return false
+        val selector = binding?.homeChangeApi ?: return false
+        holder.isVisible = true
+        holder.translationY = 0f
+        selector.requestFocus()
+        selector.post {
+            if (!selector.hasFocus()) {
+                holder.isVisible = true
+                holder.translationY = 0f
+                selector.requestFocus()
+            }
+        }
+        return true
     }
 }

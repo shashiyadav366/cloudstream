@@ -81,6 +81,12 @@
             app:defaultValue="false"
             app:key="@string/playback_speed_enabled_key" />
         <SwitchPreference
+            android:icon="@drawable/ic_baseline_speed_24"
+            android:summary="@string/remember_speed_settings_des"
+            android:title="@string/remember_speed_settings"
+            app:defaultValue="false"
+            app:key="@string/remember_speed_enabled_key" />
+        <SwitchPreference
             android:icon="@drawable/ic_compressor_24"
             android:summary="@string/compressor_setting_summary"
             android:title="@string/compressor_setting"

@@ -98,7 +98,6 @@ import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.subtitles.SaveCaptionStyle
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment.Companion.applyStyle
-import com.lagradost.cloudstream3.utils.AppContextUtils.isUsingMobileData
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.CLEARKEY_DRM_UUID
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
@@ -1132,17 +1131,25 @@ class CS3IPlayer : IPlayer {
                         else -> isLayout(PHONE or EMULATOR) to false
                     }
 
-                    // Only create the compressor when the setting is actually enabled.
-                    // When it's off, `compressor` stays null and nothing about the audio
-                    // pipeline is touched — same behaviour as before this feature existed.
+                    // Always build the compressor and keep it in the audio pipeline, even when
+                    // the feature is currently disabled. This is what makes the compressor
+                    // usable — and its dialog reachable from the player controls — instantly on
+                    // a video that is already playing, instead of only after reopening the
+                    // player. When disabled the processor copies samples through unchanged.
                     val isCompressorEnabled = settingsManager.getBoolean(
                         context.getString(R.string.compressor_enabled_key),
                         false
                     )
-                    compressor = if (isCompressorEnabled) DynamicRangeCompressor().apply { restoreSavedSettings() } else null
+                    val activeCompressor = DynamicRangeCompressor().apply {
+                        restoreSavedSettings()
+                        // The feature toggle wins on a fresh player: when the feature is off the
+                        // compressor stays in passthrough no matter what the dialog saved.
+                        enabled = enabled && isCompressorEnabled
+                    }
+                    compressor = activeCompressor
 
                     val factory = if (isSoftwareDecodingEnabled) {
-                        FixedNextRenderersFactory(context, compressor).apply {
+                        FixedNextRenderersFactory(context, activeCompressor).apply {
                             setEnableDecoderFallback(true)
                             setExtensionRendererMode(
                                 if (isSoftwareDecodingPreferred)
@@ -1152,23 +1159,17 @@ class CS3IPlayer : IPlayer {
                             )
                         }
                     } else {
-                        val activeCompressor = compressor
-                        if (activeCompressor == null) {
-                            // no nextlib = EXTENSION_RENDERER_MODE_OFF, no compressor = fully default sink
-                            DefaultRenderersFactory(context)
-                        } else {
-                            object : DefaultRenderersFactory(context) {
-                                @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-                                override fun buildAudioSink(
-                                    ctx: Context,
-                                    enableFloatOutput: Boolean,
-                                    enableAudioTrackPlaybackParams: Boolean
-                                ) = DefaultAudioSink.Builder(ctx)
-                                    .setEnableFloatOutput(enableFloatOutput)
-                                    .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
-                                    .setAudioProcessors(arrayOf<AudioProcessor>(activeCompressor))
-                                    .build()
-                            }
+                        object : DefaultRenderersFactory(context) {
+                            @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+                            override fun buildAudioSink(
+                                ctx: Context,
+                                enableFloatOutput: Boolean,
+                                enableAudioTrackPlaybackParams: Boolean
+                            ) = DefaultAudioSink.Builder(ctx)
+                                .setEnableFloatOutput(enableFloatOutput)
+                                .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
+                                .setAudioProcessors(arrayOf<AudioProcessor>(activeCompressor))
+                                .build()
                         }
                     }
 
@@ -1464,11 +1465,7 @@ return exoPlayerBuilder.build().apply {
         onlineSource: DataSource.Factory? = null,
     ) {
         Log.i(TAG, "loadExo")
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
-        val maxVideoHeight = settingsManager.getInt(
-            context.getString(if (context.isUsingMobileData()) R.string.quality_pref_mobile_data_key else R.string.quality_pref_key),
-            Int.MAX_VALUE
-        )
+        val maxVideoHeight = getMaxVideoHeight(context)
         val settings = AppSettings(context)
 
         try {

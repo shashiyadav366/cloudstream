@@ -2,9 +2,12 @@ package com.lagradost.cloudstream3.ui.settings
 
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import androidx.annotation.StringRes
+import androidx.appcompat.widget.SearchView
 import androidx.core.view.children
 import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
@@ -152,6 +155,92 @@ class SettingsFragment : BaseFragment<MainSettingsBinding>(
                     padBottom = isLandscape()
                 )
             }
+        }
+
+        /**
+         * On TV a focused search field keeps focus even after the on-screen keyboard is
+         * dismissed, so D-pad up/down only moves the text cursor and the user is stuck.
+         * Redirect up/down out of the field to the given views, like the settings search bar.
+         */
+        fun SearchView?.setTvDpadNavigation(upView: View?, downView: View?) {
+            if (!isLayout(TV or EMULATOR)) return
+            val editText = this?.findViewById<View>(androidx.appcompat.R.id.search_src_text) ?: return
+            editText.setOnKeyListener { _, keyCode, event ->
+                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        downView?.requestFocus()
+                        true
+                    }
+
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        upView?.requestFocus()
+                        true
+                    }
+
+                    else -> false
+                }
+            }
+        }
+
+        /**
+         * On TV the remote BACK button hides the search keyboard by clearing focus, which drops
+         * focus to nothing (or bubbles it up to the DecorView) without collapsing the field.
+         * [CommonActivity.dispatchKeyEvent] then bails out of D-pad handling, so up/down stop
+         * working. Whenever focus is lost like this, move it to [listView] so an item is selected —
+         * exactly like using the keyboard's own search/done key (onQueryTextSubmit).
+         *
+         * Focus that lands on a real view (the search field itself, chips or list items) is left
+         * untouched, so normal D-pad navigation keeps its own targets.
+         */
+        fun View.setupSearchKeyboardDismissFocus(searchView: SearchView?, listView: View?) {
+            if (!isLayout(TV or EMULATOR) || searchView == null || listView == null) return
+            val root = this
+
+            // True only for containers that hold the search field (e.g. the DecorView), never for
+            // the search field itself or its children.
+            fun isStrictAncestorOfSearch(view: View?): Boolean {
+                var current = searchView.parent as? View
+                while (current != null) {
+                    if (current === view) return true
+                    current = current.parent as? View
+                }
+                return false
+            }
+
+            fun focusIsLost(): Boolean {
+                val focused = root.rootView.findFocus()
+                return focused == null || isStrictAncestorOfSearch(focused)
+            }
+
+            // Move selection onto the list, exactly like onQueryTextSubmit does for the IME
+            // search/done key. Focus may settle to the DecorView after clearFocus, so re-check.
+            fun restoreFocus() {
+                if (focusIsLost()) listView.requestFocus()
+            }
+
+            // Trigger 1: focus cleared or bubbled up to a container — what BACK does.
+            val focusChangeListener = ViewTreeObserver.OnGlobalFocusChangeListener { _, newFocus ->
+                if (newFocus != null && !isStrictAncestorOfSearch(newFocus)) {
+                    return@OnGlobalFocusChangeListener
+                }
+                root.post { if (root.isAttachedToWindow) restoreFocus() }
+            }
+            root.viewTreeObserver.addOnGlobalFocusChangeListener(focusChangeListener)
+
+            // Trigger 2: SearchView forwards the field's own focus change here; this is the very
+            // signal BACK produces (SearchView.clearFocus -> searchSrcText.onFocusChange(false)).
+            searchView.setOnQueryTextFocusChangeListener { _, hasFocus ->
+                if (!hasFocus) root.post { if (root.isAttachedToWindow) restoreFocus() }
+            }
+
+            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {}
+                override fun onViewDetachedFromWindow(v: View) {
+                    root.viewTreeObserver.removeOnGlobalFocusChangeListener(focusChangeListener)
+                    root.removeOnAttachStateChangeListener(this)
+                }
+            })
         }
 
         fun getFolderSize(dir: File): Long {

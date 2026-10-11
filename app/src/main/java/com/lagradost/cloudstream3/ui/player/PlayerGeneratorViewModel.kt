@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.ui.player
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -14,11 +15,13 @@ import com.lagradost.cloudstream3.ui.player.source_priority.ProfileSettings
 import com.lagradost.cloudstream3.ui.player.source_priority.QualityDataHelper
 import com.lagradost.cloudstream3.ui.player.source_priority.QualityDataHelper.getLinkPriority
 import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.utils.AppContextUtils.isUsingMobileData
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.videoskip.SkipAPI
 import com.lagradost.cloudstream3.utils.videoskip.VideoSkipStamp
+import com.lagradost.cloudstream4.AppSettings
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.PersistentSet
 import kotlinx.collections.immutable.persistentListOf
@@ -67,7 +70,7 @@ data class VideoState(
      *
      * sortedBy is not exactly expensive, but each hasNextMirror does it again, so this alleviates unnecessary recomputation
      * */
-    private val sortedLinks: ConcurrentHashMap<Int, List<DisplayLink>> = ConcurrentHashMap()
+    private val sortedLinks: ConcurrentHashMap<Pair<Int, Int>, List<DisplayLink>> = ConcurrentHashMap()
 
     /**
      * The cache is guaranteed to be up to date link-wise due to the immutable links.
@@ -85,11 +88,12 @@ data class VideoState(
         hideErrorSources: Boolean
     ): DisplayLink {
         val priority = getLinkPriority(qualityProfile, this.first)
+        // Only hide links the user explicitly filtered out; links above the maximum
+        // resolution stay visible so they can be selected manually in the player.
         val shouldHideLink =
-            (hideNegativeSources && priority < 0) || (hideErrorSources && hasLinkErrored(this))
-        val displayLink = DisplayLink(this, !shouldHideLink, priority)
-
-        return displayLink
+            (hideNegativeSources && priority < 0) ||
+                    (hideErrorSources && hasLinkErrored(this))
+        return DisplayLink(this, !shouldHideLink, priority)
     }
 
     // Modifying sortedLinks is not considered a "visible" side effect, and rerunning it does not change the result
@@ -97,8 +101,9 @@ data class VideoState(
     /** Returns .links in the sorted order according to the qualityProfile.
      * Use .links if order is not needed */
     @Contract(pure = true)
-    fun sortLinks(qualityProfile: Int): List<DisplayLink> {
-        sortedLinks[qualityProfile]?.let {
+    fun sortLinks(qualityProfile: Int, maxVideoHeight: Int = Int.MAX_VALUE): List<DisplayLink> {
+        val cacheKey = qualityProfile to maxVideoHeight
+        sortedLinks[cacheKey]?.let {
             return it
         }
 
@@ -113,7 +118,7 @@ data class VideoState(
         }.sortedBy {
             // negative because we want to sort highest quality first
             -it.priority
-        }.also { value -> sortedLinks[qualityProfile] = value }
+        }.also { value -> sortedLinks[cacheKey] = value }
     }
 
     @Contract(pure = true)
@@ -473,4 +478,19 @@ class PlayerGeneratorViewModel : ViewModel() {
             }
         }
     }
+}
+
+/**
+ * Maximum video height (in pixels) this device/network is allowed to play, or
+ * [Int.MAX_VALUE] when there is no limit. Defaults to 1080p on TVs, since many older
+ * TVs fail to decode anything above 1080p and never start playback.
+ */
+fun getMaxVideoHeight(context: Context): Int {
+    val settings = AppSettings(context)
+    val maxVideoHeight = if (context.isUsingMobileData()) {
+        settings.player.maxVideoHeightMobileData.get()
+    } else {
+        settings.player.maxVideoHeight.get()
+    }
+    return if (maxVideoHeight > 0) maxVideoHeight else Int.MAX_VALUE
 }

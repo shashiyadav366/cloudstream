@@ -8832,6 +8832,7 @@ public final class com/lagradost/cloudstream3/utils/Qualities : java/lang/Enum {
 	public static final field P240 Lcom/lagradost/cloudstream3/utils/Qualities;
 	public static final field P360 Lcom/lagradost/cloudstream3/utils/Qualities;
 	public static final field P480 Lcom/lagradost/cloudstream3/utils/Qualities;
+	public static final field P540 Lcom/lagradost/cloudstream3/utils/Qualities;
 	public static final field P720 Lcom/lagradost/cloudstream3/utils/Qualities;
 	public static final field Unknown Lcom/lagradost/cloudstream3/utils/Qualities;
 	public final fun getDefaultPriority ()I

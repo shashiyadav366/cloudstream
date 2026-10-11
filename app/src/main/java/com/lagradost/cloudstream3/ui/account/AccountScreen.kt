@@ -399,7 +399,7 @@ object AccountScreen {
                         },
                         keyboardOptions = KeyboardOptions.Default.copy(
                             imeAction = ImeAction.Done,
-                            keyboardType = KeyboardType.PersonName,
+                            keyboardType = KeyboardType.Text,
                         ),
                         placeHolder = stringResource(R.string.name)
                     )

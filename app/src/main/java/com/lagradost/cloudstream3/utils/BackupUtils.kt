@@ -1,6 +1,7 @@
 package com.lagradost.cloudstream3.utils
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.widget.Toast
@@ -19,6 +20,7 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY_LOCAL
+import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.providers.AniListApi.Companion.ANILIST_CACHED_LIST
 import com.lagradost.cloudstream3.syncproviders.providers.MALApi.Companion.MAL_CACHED_LIST
@@ -56,6 +58,7 @@ import java.lang.System.currentTimeMillis
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.system.exitProcess
 
 object BackupUtils {
 
@@ -237,6 +240,51 @@ object BackupUtils {
         for(api in AccountManager.syncApis) {
             api.requireLibraryRefresh = true
         }
+    }
+
+    /**
+     * Wipes all app data (settings, datastore, plugins, databases, caches and the external
+     * local plugins folder) so the app behaves as if it was freshly installed. Downloaded
+     * videos in shared storage are left untouched, mirroring what uninstalling the app
+     * would do.
+     */
+    @WorkerThread
+    fun factoryReset(context: Context) {
+        // SharedPreferences: DataStore and app settings
+        runCatching { context.getSharedPrefs().edit(commit = true) { clear() } }
+            .onFailure { logError(it) }
+        runCatching { context.getDefaultSharedPrefs().edit(commit = true) { clear() } }
+            .onFailure { logError(it) }
+
+        // Databases
+        runCatching { context.databaseList()?.forEach { context.deleteDatabase(it) } }
+            .onFailure { logError(it) }
+
+        // Internal/external app files (plugins live in filesDir/Extensions) and caches
+        listOfNotNull(
+            context.filesDir,
+            context.cacheDir,
+            context.codeCacheDir,
+            context.noBackupFilesDir,
+            context.getExternalFilesDir(null),
+        ).forEach { dir ->
+            runCatching { dir.listFiles()?.forEach { it.deleteRecursively() } }
+                .onFailure { logError(it) }
+        }
+
+        // External local plugins (/Cloudstream3/plugins)
+        runCatching { PluginManager.deleteLocalPluginsFolder() }
+            .onFailure { logError(it) }
+    }
+
+    /** Restarts the app so all in-memory state is dropped, e.g. after a factory reset. */
+    fun restartApp(context: Context) {
+        val component =
+            context.packageManager.getLaunchIntentForPackage(context.packageName)?.component
+        if (component != null) {
+            context.startActivity(Intent.makeRestartActivityTask(component))
+        }
+        exitProcess(0)
     }
 
     fun backup(context: Context?) = ioSafe {

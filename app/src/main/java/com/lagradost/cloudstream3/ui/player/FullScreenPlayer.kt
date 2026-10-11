@@ -101,6 +101,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     protected var androidTVInterfaceOffSeekTime = 10000L
     protected var androidTVInterfaceOnSeekTime = 30000L
     protected var playBackSpeedEnabled = false
+    protected var rememberPlayBackSpeedEnabled = false
     protected var playerResizeEnabled = false
     protected var playerRotateEnabled = false
     protected var rotatedManually = false
@@ -276,8 +277,12 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         val ctx = context ?: return
         try {
             val settingsManager = PreferenceManager.getDefaultSharedPreferences(ctx)
+            val wasRememberPlayBackSpeedEnabled = rememberPlayBackSpeedEnabled
             playBackSpeedEnabled = settingsManager.getBoolean(
                 ctx.getString(R.string.playback_speed_enabled_key), false
+            )
+            rememberPlayBackSpeedEnabled = settingsManager.getBoolean(
+                ctx.getString(R.string.remember_speed_enabled_key), false
             )
             playerRotateEnabled = settingsManager.getBoolean(
                 ctx.getString(R.string.rotate_video_key), false
@@ -302,6 +307,28 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                     if (isLayout(TV or EMULATOR)) false else playerRotateEnabled
                 if (hideControlsNames) {
                     hideControlsNames()
+                }
+            }
+
+            // Apply the compressor toggle to the already-running player instead of waiting for
+            // it to be rebuilt. The compressor always lives in the audio pipeline now, so this
+            // takes effect immediately (and its dialog stays reachable while playing).
+            (player as? CS3IPlayer)?.compressor?.let { c ->
+                if (playBackCompressorEnabled) {
+                    restoreCompressorSettings()
+                } else {
+                    c.enabled = false
+                }
+            }
+
+            // If "remember playback speed" was just turned on, apply the remembered speed to the
+            // current player right away rather than only on the next video. If it was turned off,
+            // go back to normal speed instead of staying stuck at the remembered speed.
+            if (!player.isLiveStream) {
+                if (rememberPlayBackSpeedEnabled) {
+                    setPlayBackSpeed(DataStoreHelper.playBackSpeed)
+                } else if (wasRememberPlayBackSpeedEnabled) {
+                    setPlayBackSpeed(1.0f)
                 }
             }
         } catch (e: Exception) {
@@ -588,7 +615,8 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     private fun setPlayBackSpeed(speed: Float) {
         try {
             // Live stream speeds are session-only and never remembered.
-            if (!player.isLiveStream) {
+            // Static video speeds are only remembered when the user enabled it.
+            if (rememberPlayBackSpeedEnabled && !player.isLiveStream) {
                 DataStoreHelper.playBackSpeed = speed
             }
         } catch (e: Exception) {
@@ -1548,7 +1576,12 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
         val view = binding.root
         // init variables
-        setPlayBackSpeed(DataStoreHelper.playBackSpeed)
+        val rememberSpeed = context?.let { ctx ->
+            PreferenceManager.getDefaultSharedPreferences(ctx).getBoolean(
+                ctx.getString(R.string.remember_speed_enabled_key), false
+            )
+        } == true
+        setPlayBackSpeed(if (rememberSpeed) DataStoreHelper.playBackSpeed else 1.0f)
         savedInstanceState?.getLong(SUBTITLE_DELAY_BUNDLE_KEY)?.let {
             subtitleDelay = it
         }
@@ -1587,6 +1620,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
                     val res = ctx2.resources
                     when (key) {
                         res.getString(R.string.playback_speed_enabled_key),
+                        res.getString(R.string.remember_speed_enabled_key),
                         res.getString(R.string.compressor_enabled_key),
                         res.getString(R.string.rotate_video_key),
                         res.getString(R.string.player_resize_enabled_key),

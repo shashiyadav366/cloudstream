@@ -34,10 +34,10 @@ class FixedNextRenderersFactory(
     }
 
     /**
-     * Only builds a custom [DefaultAudioSink] when a compressor is actually supplied.
-     * When [compressor] is null (the setting is off, or unsupported on this device) we
-     * fall through to the completely unmodified default sink from the parent factory,
-     * so playback behaves exactly as it did before this feature existed.
+     * Builds a custom [DefaultAudioSink] that keeps the [compressor] in the audio pipeline.
+     * The compressor is always supplied now (even when the feature is disabled) so that it can
+     * be toggled on/off instantly while a video is playing; when disabled it is a passthrough.
+     * Should [compressor] ever be null we fall through to the unmodified default sink.
      */
     @OptIn(UnstableApi::class)
     override fun buildAudioSink(

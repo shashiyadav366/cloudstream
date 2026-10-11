@@ -10,9 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,7 +46,9 @@ import com.lagradost.cloudstream3.utils.SubtitleHelper.fromTagToLanguageName
 import com.lagradost.cloudstream3.utils.SubtitleHelper.getNameNextToFlagEmoji
 import com.lagradost.cloudstream4.AppSettings
 import com.lagradost.cloudstream4.compose.ActionDialog
+import com.lagradost.cloudstream4.compose.BlackButton
 import com.lagradost.cloudstream4.compose.PHONE
+import com.lagradost.cloudstream4.compose.WhiteButton
 import com.lagradost.cloudstream4.compose.isLayout
 import com.lagradost.cloudstream4.rememberAppSettings
 import com.lagradost.cloudstream4.theme.CloudStreamPreviewTheme
@@ -129,6 +131,7 @@ object SettingsGeneralScreen : SearchableSettings {
             val context = LocalContext.current
             AlertDialog(
                 onDismissRequest = { isBlockedLinksShown = false },
+                containerColor = MaterialTheme.colorScheme.background,
                 title = { Text(stringResource(R.string.blocked_links_title)) },
                 text = {
                     Column {
@@ -142,7 +145,7 @@ object SettingsGeneralScreen : SearchableSettings {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    WhiteButton(text = stringResource(R.string.ok), onClick = {
                         isBlockedLinksShown = false
                         val value = state.value
                         val list = LinkBlocker.parseUserBlockedLinks(value)
@@ -151,10 +154,12 @@ object SettingsGeneralScreen : SearchableSettings {
                         }
                         LinkBlocker.saveUserBlockedLinks(list)
                         blockedLinks.value = list
-                    }) { Text(stringResource(R.string.ok)) }
+                    })
                 },
                 dismissButton = {
-                    TextButton(onClick = { isBlockedLinksShown = false }) { Text(stringResource(R.string.cancel)) }
+                    BlackButton(text = stringResource(R.string.cancel), onClick = {
+                        isBlockedLinksShown = false
+                    })
                 }
             )
         }

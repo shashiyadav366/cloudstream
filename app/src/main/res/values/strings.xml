@@ -152,6 +152,8 @@
     <string name="chromecast_subtitles_settings_des">Chromecast subtitles settings</string>
     <string name="eigengraumode_settings">Playback speed</string>
     <string name="speed_setting_summary">Adds a speed option in the player</string>
+    <string name="remember_speed_settings">Remember playback speed</string>
+    <string name="remember_speed_settings_des">Play static videos at your last used playback speed</string>
     <string name="swipe_to_seek_settings">Swipe to seek</string>
     <string name="swipe_to_seek_settings_des">Swipe from side to side to control your position in a video</string>
     <string name="swipe_to_change_settings">Swipe to change settings</string>
@@ -177,6 +179,9 @@
     <string name="episode_sync_settings_des">Automatically sync your current episode progress</string>
     <string name="restore_settings">Restore data from backup</string>
     <string name="backup_settings">Back up data</string>
+    <string name="reset_app_title">Reset app</string>
+    <string name="reset_app_summary">Delete all settings, plugins, accounts and data</string>
+    <string name="reset_app_confirm_message">This will permanently delete all settings, plugins, accounts and data, then restart the app. This cannot be undone.</string>
     <string name="backup_frequency">Backup frequency</string>
     <string name="restore_success">Data recovered from backup</string>
     <string name="restore_failed_format" formatted="true">Failed to restore data from file %s</string>
@@ -349,6 +354,8 @@
     <string name="update">Update</string>
     <string name="watch_quality_pref">Preferred watch quality (WiFi)</string>
     <string name="watch_quality_pref_data">Preferred watch quality (Mobile Data)</string>
+    <string name="max_video_quality">Maximum video quality</string>
+    <string name="max_video_quality_des">Links and streams above this resolution are skipped. Older TVs should stay at 1080p to avoid playback failures.</string>
     <string name="limit_title">Video player title max chars</string>
     <string name="limit_title_rez">Show player information</string>
     <string name="video_buffer_size_settings">Video buffer size</string>

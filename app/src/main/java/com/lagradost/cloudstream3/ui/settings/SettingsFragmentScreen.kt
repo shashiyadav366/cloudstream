@@ -34,6 +34,7 @@ import androidx.compose.material3.rememberSearchBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.NonRestartableComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,11 +43,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -290,23 +297,77 @@ object SettingsFragmentScreen : Screen {
     @Composable
     fun SettingsSearch(textFieldState : TextFieldState) {
         var hasFocus by remember { mutableStateOf(false) }
-        val focusProgress by animateFloatAsState(targetValue = if (hasFocus) 1.0f else 0.0f)
+        val isTv = isLayout(TV)
+        // On TV the field starts collapsed and read-only so that merely navigating onto it shows
+        // focus but does NOT expand the bar or open the on-screen keyboard (which would trap the
+        // D-pad). It only expands + opens the keyboard once the user actually selects it (OK).
+        var isEditing by remember { mutableStateOf(false) }
+        val isActive = if (isTv) isEditing else hasFocus
+        val focusProgress by animateFloatAsState(targetValue = if (isActive) 1.0f else 0.0f)
         val focusManager = LocalFocusManager.current
         val focusRequester = remember { FocusRequester() }
+        val keyboardController = LocalSoftwareKeyboardController.current
+
+        // Entering edit mode happens while the field already has focus, so we re-request focus and
+        // explicitly ask for the IME, since a focus change is what normally triggers the keyboard.
+        LaunchedEffect(isEditing) {
+            if (isEditing) {
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            }
+        }
+
         TextField(
             state = textFieldState,
+            // Read-only text fields are still focusable but never launch the IME, which is what
+            // keeps the keyboard from popping up while the user only navigates onto the bar.
+            readOnly = isTv && !isEditing,
             keyboardOptions = KeyboardOptions.Default.copy(
                 imeAction = ImeAction.Search,
-                // This option is bugged on compose, making it unable to open at all
-                // showKeyboardOnFocus = false
             ),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp - 12.dp * focusProgress)
-                .focusOutline(enabled = isLayout(TV), CircleShape)
+                .focusOutline(enabled = isTv, CircleShape)
                 .onFocusChanged { newFocus ->
                     hasFocus = newFocus.hasFocus
-                }.focusRequester(focusRequester),
+                    // Leaving the field collapses it back to the non-editing state.
+                    if (isTv && !newFocus.hasFocus) isEditing = false
+                }.focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+
+                    // Selecting the field expands it and opens the keyboard; navigating onto it
+                    // does nothing, so the rows below stay reachable with the D-pad.
+                    if (isTv && (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)) {
+                        if (!isEditing) {
+                            isEditing = true
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+
+                    // A focused text field consumes the D-pad keys for cursor movement, which
+                    // traps the user in the search bar on TV. Forward them to the Compose focus
+                    // system instead so focus can move up/down/left/right again.
+                    val direction = when (event.key) {
+                        Key.DirectionUp -> FocusDirection.Up
+                        Key.DirectionDown -> FocusDirection.Down
+                        Key.DirectionLeft -> FocusDirection.Left
+                        Key.DirectionRight -> FocusDirection.Right
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    if (isTv) {
+                        keyboardController?.hide()
+                        isEditing = false
+                        if (!focusManager.moveFocus(direction)) {
+                            focusManager.clearFocus()
+                        }
+                    } else {
+                        focusManager.moveFocus(direction)
+                    }
+                    true
+                },
             placeholder = {
                 Text(text = stringResource(R.string.search_hint))
             },
@@ -326,12 +387,13 @@ object SettingsFragmentScreen : Screen {
             ),
             leadingIcon = {
                 Crossfade(
-                    targetState = hasFocus,
+                    targetState = isActive,
                     label = "leftsearch",
                 ) { value ->
                     if (value) {
                         IconButton(onClick = {
                             textFieldState.edit { replace(0, length, "") }
+                            isEditing = false
                             focusManager.clearFocus()
                         }) {
                             Icon(
@@ -341,7 +403,7 @@ object SettingsFragmentScreen : Screen {
                         }
                     } else {
                         IconButton(onClick = {
-                            focusRequester.requestFocus()
+                            if (isTv) isEditing = true else focusRequester.requestFocus()
                         }) {
                             Icon(
                                 painter = painterResource(R.drawable.search_icon),
@@ -353,7 +415,7 @@ object SettingsFragmentScreen : Screen {
             },
             trailingIcon = {
                 Crossfade(
-                    targetState = hasFocus,
+                    targetState = isActive,
                     label = "rightsearch",
                 ) { value ->
                     if (value) {
@@ -370,7 +432,6 @@ object SettingsFragmentScreen : Screen {
             },
         )
 
-        val keyboardController = LocalSoftwareKeyboardController.current
         DisposableEffect(Unit) {
             onDispose {
                 keyboardController?.hide()

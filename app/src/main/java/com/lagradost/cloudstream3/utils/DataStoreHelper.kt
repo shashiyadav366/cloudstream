@@ -852,20 +852,54 @@ object DataStoreHelper {
     }
 
     var pinnedProviders: Array<String>
-        get() = getKey<Array<String>>(USER_PINNED_PROVIDERS) ?: emptyArray<String>()
+        get() {
+            val stored = getKey<Array<String>>(USER_PINNED_PROVIDERS) ?: emptyArray<String>()
+            // Migrate pins that embed the absolute plugin path (which includes filesDir and
+            // therefore the app package/flavour) to a portable path so backups keep working
+            // when restored on a different install or build flavour.
+            val normalized = stored.map { normalizeProviderPin(it) }
+            if (normalized.size != stored.size ||
+                normalized.indices.any { normalized[it] != stored[it] }
+            ) {
+                setKey(USER_PINNED_PROVIDERS, normalized.toTypedArray())
+            }
+            return normalized.toTypedArray()
+        }
         set(value) = setKey(USER_PINNED_PROVIDERS, value)
 
     /**
      * Builds the storage key for a pinned provider.
      *
-     * Built-in providers are stored by name, plugin providers by "name\u0000sourcePlugin"
+     * Built-in providers are stored by name, plugin providers by "name\u0000pluginId"
      * so two plugins exposing the same provider name (e.g. two different
      * repositories both having "Moviebox") can be pinned independently.
-     * sourcePlugin (the plugin file path) is stable across restarts and unique
-     * per repository plugin file.
+     * pluginId is the plugin path relative to the Extensions folder, which is
+     * stable across installs/flavours (unlike the absolute path which contains
+     * filesDir and the app package).
      */
     fun getProviderPinKey(name: String, sourcePlugin: String?): String {
-        return if (sourcePlugin == null) name else "$name\u0000$sourcePlugin"
+        return if (sourcePlugin == null) name else "$name\u0000${stablePluginId(sourcePlugin)}"
+    }
+
+    /**
+     * The app stores online plugin files under `<filesDir>/Extensions/<repo>/<plugin>.cs3`.
+     * The part after `Extensions/` is derived from the repository URL and the plugin
+     * internal name, so it does not change when the package name, user id or build
+     * flavour (all of which change filesDir) differs.
+     */
+    private fun stablePluginId(sourcePlugin: String): String {
+        val marker = "Extensions/"
+        val index = sourcePlugin.lastIndexOf(marker)
+        return if (index >= 0) sourcePlugin.substring(index + marker.length) else sourcePlugin
+    }
+
+    /** Converts a stored pin to the portable "name\u0000pluginId" format. */
+    private fun normalizeProviderPin(pin: String): String {
+        val separator = pin.indexOf('\u0000')
+        if (separator < 0) return pin // legacy name-only pin
+        val name = pin.substring(0, separator)
+        val sourcePlugin = pin.substring(separator + 1)
+        return getProviderPinKey(name, sourcePlugin)
     }
 
     /**

@@ -33,6 +33,8 @@ import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setSystemBarsPadding
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setToolBarScrollFlags
+import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setTvDpadNavigation
+import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setupSearchKeyboardDismissFocus
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setUpToolbar
 import com.lagradost.cloudstream3.utils.AppContextUtils.addRepositoryDialog
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
@@ -241,6 +243,7 @@ class ExtensionsFragment : BaseFragment<FragmentExtensionsBinding>(
             searchView?.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
                     pluginViewModel.search(query)
+                    binding.pluginRecyclerView.requestFocus()
                     return true
                 }
 
@@ -249,6 +252,16 @@ class ExtensionsFragment : BaseFragment<FragmentExtensionsBinding>(
                     return true
                 }
             })
+
+            searchView.setTvDpadNavigation(
+                upView = binding.settingsToolbar,
+                downView = binding.pluginRecyclerView,
+            )
+
+            binding.root.setupSearchKeyboardDismissFocus(
+                searchView = searchView,
+                listView = binding.pluginRecyclerView,
+            )
         }
 
 

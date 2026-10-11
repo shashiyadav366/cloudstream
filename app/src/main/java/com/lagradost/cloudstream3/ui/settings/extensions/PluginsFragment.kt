@@ -20,6 +20,8 @@ import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setSystemBarsPadding
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setToolBarScrollFlags
+import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setTvDpadNavigation
+import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setupSearchKeyboardDismissFocus
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setUpToolbar
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiProviderLangSettings
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
@@ -142,6 +144,7 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
             searchView?.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
                     pluginViewModel.search(query)
+                    binding.pluginRecyclerView.requestFocus()
                     return true
                 }
 
@@ -150,6 +153,16 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
                     return true
                 }
             })
+
+            searchView.setTvDpadNavigation(
+                upView = binding.tvtypesChipsScroll.root,
+                downView = binding.pluginRecyclerView,
+            )
+
+            binding.root.setupSearchKeyboardDismissFocus(
+                searchView = searchView,
+                listView = binding.pluginRecyclerView,
+            )
         }
 //        searchView?.onActionViewCollapsed = {
 //            pluginViewModel.search(null)

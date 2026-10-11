@@ -855,10 +855,11 @@ enum class Qualities(var value: Int, val defaultPriority: Int) {
     P240(240, 2), // 240p
     P360(360, 3), // 360p
     P480(480, 4), // 480p
-    P720(720, 5), // 720p
-    P1080(1080, 6), // 1080p
-    P1440(1440, 7), // 1440p
-    P2160(2160, 8); // 4k or 2160p
+    P540(540, 5), // 540p
+    P720(720, 6), // 720p
+    P1080(1080, 7), // 1080p
+    P1440(1440, 8), // 1440p
+    P2160(2160, 9); // 4k or 2160p
 
     companion object {
         fun getStringByInt(qual: Int?): String {
