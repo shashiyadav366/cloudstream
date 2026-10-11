@@ -1,17 +1,16 @@
 package com.lagradost.cloudstream3.ui.settings
 
-import androidx.compose.runtime.Immutable
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream4.viewmodels.GithubFile
+import com.lagradost.cloudstream4.viewmodels.GithubRepository
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import java.io.IOException
-import kotlin.jvm.Throws
+import java.io.FileNotFoundException
 
-object GithubReleases {
+object GithubReleases : GithubRepository {
     @Serializable
     private data class GithubAsset(
-        @JsonProperty("id") @SerialName("id") val id: Long,
         @JsonProperty("name") @SerialName("name") val name: String,
         @JsonProperty("size") @SerialName("size") val size: Int, // Size in bytes
         @JsonProperty("browser_download_url") @SerialName("browser_download_url") val browserDownloadUrl: String,
@@ -43,65 +42,33 @@ object GithubReleases {
         @JsonProperty("object") @SerialName("object") val githubObject: GithubObject,
     )
 
-    /** GitHub file update package */
-    @Immutable
-    data class GithubFile(
-        /** File digest, sha:xxx */
-        val digest: String?,
-        /** File url for download */
-        val downloadUrl: String,
-        /** Filename without the extension */
-        val displayName: String,
-        /** Changelog, aka the commit message */
-        val changeLog: String,
-        /** Name of the tag, aka unique release name like vX.X.X or pre-release */
-        val tagName: String,
-        /** Unique node id */
-        val nodeId: String,
-    )
+    const val APK_USERNAME = "recloudstream"
+    const val APK_REPOSITORY = "cloudstream"
+    const val APK_PRERELEASE = "pre-release"
+    const val APK_CONTENT_TYPE = "application/vnd.android.package-archive"
 
-    /**
-     * Builds the GitHub API headers, adding the token as a Bearer token when set,
-     * which is required to access private repositories.
-     */
-    private fun githubHeaders(token: String?, accept: String = "application/vnd.github.v3+json"): Map<String, String> {
-        val headers = mutableMapOf("Accept" to accept)
-        if (!token.isNullOrBlank()) {
-            headers["Authorization"] = "Bearer $token"
-        }
-        return headers
-    }
-
-    /** Throw a readable error instead of trying to parse a GitHub error body as JSON */
-    private fun failedRequest(code: Int): Nothing =
-        throw IOException("GitHub API request failed ($code). If the repository is private, set a GitHub token in the update settings.")
+    private val defaultHeaders = mapOf("Accept" to "application/vnd.github.v3+json")
 
     @Throws
-    suspend fun getShaFromTag(
+    override suspend fun getSha(
         userName: String,
         repository: String,
         tag: String,
-        token: String? = null,
     ): String {
-        val response = app.get(
+        return app.get(
             url = "https://api.github.com/repos/$userName/$repository/git/ref/tags/$tag",
-            headers = githubHeaders(token)
-        )
-        if (!response.isSuccessful) {
-            failedRequest(response.code)
-        }
-        return response.parsed<GithubTag>().githubObject.sha
+            headers = defaultHeaders
+        ).parsed<GithubTag>().githubObject.sha
     }
 
     @Throws
-    suspend fun getLatestReleaseFile(
+    override suspend fun getRelease(
         userName: String,
         repository: String,
         prerelease: Boolean,
         prereleaseTag: String,
         contentType: String,
-        token: String? = null,
-    ): GithubFile? {
+    ): GithubFile {
         val latestReleaseUrl = if (prerelease) {
             // Find the release object
             // https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-a-release-by-tag-name
@@ -113,40 +80,23 @@ object GithubReleases {
             "https://api.github.com/repos/$userName/$repository/releases/latest"
         }
 
-        val response = app.get(
+        val latestRelease = app.get(
             url = latestReleaseUrl,
-            headers = githubHeaders(token)
-        )
-        if (!response.isSuccessful) {
-            failedRequest(response.code)
-        }
+            headers = defaultHeaders
+        ).parsed<GithubRelease>()
 
-        val latestRelease = response.parsed<GithubRelease>()
-
-        // Find the correct asset, given that we might have other binaries we release in the same version.
-        // When on prerelease prefer the dedicated prerelease build so the prerelease flavor always
-        // downloads its own APK instead of the stable one, mirroring the old InAppUpdater behavior.
-        val apkAssets = latestRelease.assets.filter { asset ->
+        // Find the first correct asset, given that we might have other binaries we release in the same version
+        val foundAsset = latestRelease.assets.firstOrNull { asset ->
             asset.contentType == contentType
-        }
-        val foundAsset = if (prerelease) {
-            apkAssets.firstOrNull { it.name == "app-prerelease-release.apk" }
-                ?: apkAssets.firstOrNull()
-        } else {
-            apkAssets.firstOrNull { it.name != "app-prerelease-release.apk" }
-                ?: apkAssets.firstOrNull()
         }
 
         if (foundAsset == null) {
-            return null
+            throw FileNotFoundException()
         }
 
         return GithubFile(
             digest = foundAsset.digest,
-            // The API asset url works for both public and private repositories,
-            // browser_download_url only works for public repositories.
-            // This requires the download to send "Accept: application/octet-stream".
-            downloadUrl = "https://api.github.com/repos/$userName/$repository/releases/assets/${foundAsset.id}",
+            downloadUrl = foundAsset.browserDownloadUrl,
             displayName = foundAsset.name.substringBeforeLast("."),
             changeLog = latestRelease.body,
             tagName = latestRelease.tagName,

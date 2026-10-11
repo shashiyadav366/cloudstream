@@ -52,6 +52,7 @@ import com.lagradost.cloudstream4.compose.ActionDialog
 import com.lagradost.cloudstream4.compose.BlackButton
 import com.lagradost.cloudstream4.compose.WhiteButton
 import com.lagradost.cloudstream4.rememberAppSettings
+import com.lagradost.cloudstream4.viewmodels.GithubAction
 import com.lagradost.safefile.SafeFile
 import com.mihon.presentation.settings.Preference
 import com.mihon.presentation.settings.SearchableSettings
