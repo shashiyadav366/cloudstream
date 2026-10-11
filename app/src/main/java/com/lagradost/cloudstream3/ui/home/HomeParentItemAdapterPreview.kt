@@ -185,7 +185,7 @@ class HomeParentItemAdapterPreview(
                         )
                         setNegativeButton(R.string.cancel) { _, _ -> /*NO-OP*/ }
                         setPositiveButton(R.string.delete) { _, _ ->
-                            DataStoreHelper.deleteAllResumeStateIds()
+                            DataStoreHelper.deleteAllWatchHistory()
                             viewModel.reloadStored()
                         }
                         show().setDefaultFocus()
@@ -240,7 +240,11 @@ class HomeParentItemAdapterPreview(
                         2 -> {
                             val card = callback.card
                             if (card is DataStoreHelper.ResumeWatchingResult) {
-                                DataStoreHelper.removeLastWatched(card.parentId)
+                                DataStoreHelper.removeResumeWatching(
+                                    card.parentId,
+                                    card.id,
+                                    card.url
+                                )
                                 viewModel.reloadStored()
                             }
                         }

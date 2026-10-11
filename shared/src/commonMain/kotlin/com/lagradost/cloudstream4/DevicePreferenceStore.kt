@@ -165,6 +165,7 @@ class PlayerPreferences(
     defaultMaxVideoHeight: Int = 0,
 ) {
     val episodeSync = preferences.getBoolean("episode_sync_enabled_key", true)
+    val watchHistory = preferences.getBoolean("watch_history_key", true)
     val defaultPlayer = preferences.getString("player_default_key", "")
     val maxVideoHeight = preferences.getInt("quality_pref_key", defaultMaxVideoHeight)
     val maxVideoHeightMobileData =

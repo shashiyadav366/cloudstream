@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.utils
 
 import android.content.Context
 import androidx.compose.runtime.Immutable
+import androidx.preference.PreferenceManager
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.APIHolder.unixTimeMS
@@ -551,6 +552,12 @@ object DataStoreHelper {
         removeKeys(folder)
     }
 
+    /** Removes all Continue watching entries and their saved watch progress. */
+    fun deleteAllWatchHistory() {
+        removeKeys("$currentAccount/$RESULT_RESUME_WATCHING")
+        removeKeys("$currentAccount/$VIDEO_POS_DUR")
+    }
+
     fun deleteBookmarkedData(id: Int?) {
         if (id == null) return
         AccountManager.localListApi.requireLibraryRefresh = true
@@ -715,7 +722,15 @@ object DataStoreHelper {
         return getKey<FavoritesData>("$currentAccount/$RESULT_FAVORITES_STATE_DATA", id.toString())
     }
 
+    /** Whether watch history (resume position + Continue watching) should be saved. */
+    fun isWatchHistoryEnabled(): Boolean {
+        val ctx = context ?: return true
+        return PreferenceManager.getDefaultSharedPreferences(ctx)
+            .getBoolean(ctx.getString(R.string.watch_history_key), true)
+    }
+
     fun setViewPos(id: Int?, pos: Long, dur: Long) {
+        if (!isWatchHistoryEnabled()) return
         if (id == null) return
         if (dur < 30_000) return // too short
         setKey("$currentAccount/$VIDEO_POS_DUR", id.toString(), PosDur(pos, dur))
@@ -726,6 +741,7 @@ object DataStoreHelper {
      * If nextEpisode is not specified it will not be able to set the next episode as resumable if progress > NEXT_WATCH_EPISODE_PERCENTAGE
      */
     fun setViewPosAndResume(id: Int?, position: Long, duration: Long, currentEpisode: Any?, nextEpisode: Any?) {
+        if (!isWatchHistoryEnabled()) return
         setViewPos(id, position, duration)
         if (id != null) {
             when (val meta = currentEpisode) {
@@ -780,6 +796,34 @@ object DataStoreHelper {
     fun getViewPos(id: Int?): PosDur? {
         if (id == null) return null
         return getKey<PosDur>("$currentAccount/$VIDEO_POS_DUR", id.toString(), null)
+    }
+
+    /** Removes the saved watch progress for a single episode/movie id. */
+    fun removeViewPos(id: Int?) {
+        if (id == null) return
+        removeKey("$currentAccount/$VIDEO_POS_DUR", id.toString())
+    }
+
+    /**
+     * Removes a Continue watching entry together with its saved watch progress.
+     * Any duplicate entry that points to the same title under a different id is
+     * removed as well, so hidden duplicates cannot resurface after removal.
+     */
+    fun removeResumeWatching(parentId: Int?, episodeId: Int?, url: String?) {
+        removeLastWatched(parentId)
+        removeViewPos(episodeId)
+        if (url.isNullOrBlank()) return
+        getAllResumeStateIds()?.forEach { id ->
+            if (id == parentId) return@forEach
+            val header = getKey<DownloadObjects.DownloadHeaderCached>(
+                DOWNLOAD_HEADER_CACHE, id.toString()
+            ) ?: getKey(DOWNLOAD_HEADER_CACHE_BACKUP, id.toString()) ?: return@forEach
+            if (header.url == url) {
+                val duplicateEpisodeId = getLastWatched(id)?.episodeId
+                removeLastWatched(id)
+                removeViewPos(duplicateEpisodeId)
+            }
+        }
     }
 
     fun getVideoWatchState(id: Int?): VideoWatchState? {

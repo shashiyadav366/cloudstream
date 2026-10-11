@@ -154,7 +154,8 @@ class GeneratorPlayer : FullScreenPlayer() {
         fun newInstance(
             generator: VideoGenerator<*>,
             index: Int,
-            syncData: HashMap<String, String>? = null
+            syncData: HashMap<String, String>? = null,
+            incognito: Boolean = false
         ): Bundle {
             Log.i(TAG, "newInstance = $syncData")
             val uuid = UUID.randomUUID().toString()
@@ -163,6 +164,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                 putString("uuid", uuid)
                 putInt("index", index)
                 if (syncData != null) putSerializable("syncData", syncData)
+                putBoolean("incognito", incognito)
             }
         }
 
@@ -194,6 +196,8 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     private var isPlayerActive: AtomicBoolean = AtomicBoolean(false)
     private var isNextEpisode: Boolean = false // this is used to reset the watch time
+    /** When true, this playback session must not save any watch history or sync progress. */
+    private var isIncognito: Boolean = false
 
     private var preferredAutoSelectSubtitles: String? = null // null means do nothing, "" means none
     private val allMeta: List<ResultEpisode>?
@@ -257,6 +261,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun getPos(): Long {
+        // Incognito playback starts fresh and never resumes from saved history
+        if (isIncognito) return 0L
         val durPos = getViewPos(viewModel.state.generatorState?.id) ?: return 0L
         if (durPos.duration == 0L) return 0L
         if (durPos.position * 100L / durPos.duration > 95L) {
@@ -2020,18 +2026,21 @@ class GeneratorPlayer : FullScreenPlayer() {
 
         val percentage = position * 100L / duration
 
-        DataStoreHelper.setViewPosAndResume(
-            viewModel.state.generatorState?.id,
-            position,
-            duration,
-            currentMeta,
-            nextMeta
-        )
+        // Incognito playback must not record any watch history
+        if (!isIncognito) {
+            DataStoreHelper.setViewPosAndResume(
+                viewModel.state.generatorState?.id,
+                position,
+                duration,
+                currentMeta,
+                nextMeta
+            )
+        }
 
         var isOpVisible = false
         when (val meta = currentMeta) {
             is ResultEpisode -> {
-                if (percentage >= UPDATE_SYNC_PROGRESS_PERCENTAGE && (maxEpisodeSet
+                if (!isIncognito && percentage >= UPDATE_SYNC_PROGRESS_PERCENTAGE && (maxEpisodeSet
                         ?: -1) < meta.episode
                 ) {
                     context?.let { ctx ->
@@ -2530,6 +2539,7 @@ fun closePlayerForActivityDestroy() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("index", viewModel.episodeIndex)
+        outState.putBoolean("incognito", isIncognito)
         super.onSaveInstanceState(outState)
     }
 
@@ -2539,6 +2549,8 @@ fun closePlayerForActivityDestroy() {
 
         val uuid = savedInstanceState?.getString("uuid") ?: arguments?.getString("uuid")
         val index = savedInstanceState?.getInt("index") ?: arguments?.getInt("index")
+        isIncognito = savedInstanceState?.getBoolean("incognito")
+            ?: arguments?.getBoolean("incognito") ?: false
         val generator = generators[uuid]
 
         unwrapBundle(savedInstanceState)

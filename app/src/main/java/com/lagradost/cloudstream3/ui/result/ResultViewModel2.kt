@@ -1369,6 +1369,9 @@ class ResultViewModel2 : ViewModel() {
                 }
 
                 options.add(txt(R.string.episode_action_play_in_app) to ACTION_PLAY_EPISODE_IN_PLAYER)
+                options.add(
+                    txt(R.string.episode_action_play_incognito) to ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
+                )
                 options.addAll(
                     listOf(
                         txt(R.string.episode_action_auto_download) to ACTION_DOWNLOAD_EPISODE,
@@ -1543,7 +1546,9 @@ class ResultViewModel2 : ViewModel() {
                 startChromecast(activity, click.data)
             }
 
-            ACTION_PLAY_EPISODE_IN_PLAYER -> {
+            ACTION_PLAY_EPISODE_IN_PLAYER,
+            ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO -> {
+                val isIncognito = click.action == ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
                 val list = HashMap<String, String>(currentResponse?.syncData ?: emptyMap())
                 val generator = generator ?: return
 
@@ -1562,7 +1567,7 @@ class ResultViewModel2 : ViewModel() {
                     activity?.navigate(
                         R.id.global_to_navigation_player,
                         GeneratorPlayer.newInstance(
-                            generator, index,list
+                            generator, index, list, incognito = isIncognito
                         )
                     )
                 }
@@ -1614,6 +1619,9 @@ class ResultViewModel2 : ViewModel() {
 
                         // Add internal player option
                         options.add(txt(R.string.episode_action_play_in_app) to ACTION_PLAY_EPISODE_IN_PLAYER)
+                        options.add(
+                            txt(R.string.episode_action_play_incognito) to ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
+                        )
 
                         // Add external player options 
                         options.addAll(players.filter { it !is AlwaysAskAction }.map { player ->

@@ -222,6 +222,12 @@ object SettingsPlayerScreen : SearchableSettings {
                         subtitle = stringResource(R.string.episode_sync_settings_des),
                         icon = painterResource(R.drawable.autorenew_24px)
                     ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = settings.player.watchHistory,
+                        title = stringResource(R.string.watch_history_settings),
+                        subtitle = stringResource(R.string.watch_history_settings_des),
+                        icon = painterResource(R.drawable.history_toggle_off_24px)
+                    ),
                 ),
             ),
             Preference.PreferenceGroup(

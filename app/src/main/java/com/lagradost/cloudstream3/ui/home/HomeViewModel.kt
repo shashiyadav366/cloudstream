@@ -43,7 +43,6 @@ import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE_BACKUP
 import com.lagradost.cloudstream3.utils.DataStoreHelper
-import com.lagradost.cloudstream3.utils.DataStoreHelper.deleteAllResumeStateIds
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStateIds
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllWatchStateIds
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getBookmarkedData
@@ -106,12 +105,16 @@ class HomeViewModel : ViewModel() {
                     )
                 }
             }
-            return resumeWatchingResult
+            // Collapse duplicates: the same movie/show can end up saved under multiple ids
+            // (e.g. provider id changes). Keep only the most recent entry per title.
+            return resumeWatchingResult?.distinctBy {
+                it.url.ifBlank { "${it.apiName}|${it.name}" }
+            }
         }
     }
 
     fun deleteResumeWatching() {
-        deleteAllResumeStateIds()
+        DataStoreHelper.deleteAllWatchHistory()
         loadResumeWatching()
     }
 
