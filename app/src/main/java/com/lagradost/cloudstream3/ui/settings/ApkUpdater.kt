@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.MainActivity.Companion.deleteFileOnExit
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.receivers.PackageInstallerStatusReceiver
+import com.lagradost.cloudstream3.ui.settings.GithubReleases.APK_CONTENT_TYPE
 import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream4.AppSettings
 import com.lagradost.cloudstream4.viewmodels.AppUpdater

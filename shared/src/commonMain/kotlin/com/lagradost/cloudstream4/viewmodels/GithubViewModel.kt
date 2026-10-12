@@ -84,6 +84,7 @@ interface GithubRepository {
         prerelease: Boolean,
         prereleaseTag: String,
         contentType: String,
+        token: String? = null,
     ): GithubFile
 
     @Throws
@@ -91,6 +92,7 @@ interface GithubRepository {
         userName: String,
         repository: String,
         tag: String,
+        token: String? = null,
     ): String
 }
 
@@ -162,6 +164,9 @@ class GithubViewModel(
     val settings: AppSettings,
     val updater: AppUpdater,
     val repository: GithubRepository,
+    /** Supplies the optional GitHub token, required for private repositories.
+     *  Wired from the app layer as `shared` cannot access Android storage. */
+    val tokenProvider: () -> String? = { null },
 ) : ViewModel(), StateContainer<GithubState> by DefaultStateContainer(GithubState()),
     ActionHandler<GithubAction> {
     private val updateDispatcher = SingleActiveQuery(Dispatchers.IO)
@@ -261,6 +266,8 @@ class GithubViewModel(
             copy(dialog = baseDialog)
         }
 
+        val token = tokenProvider()
+
         // If on pre-release check if the sha matches, as we do not look at the version
         var oldSha: String? = null
         var newSha: String? = null
@@ -269,6 +276,7 @@ class GithubViewModel(
                 tag = remotePrereleaseTag,
                 userName = remoteUserName,
                 repository = remoteRepository,
+                token = token,
             )
             oldSha = buildSha.take(7)
             newSha = sha.take(7)
@@ -287,7 +295,8 @@ class GithubViewModel(
             userName = remoteUserName,
             repository = remoteRepository,
             prereleaseTag = remotePrereleaseTag,
-            contentType = remoteContentType
+            contentType = remoteContentType,
+            token = token,
         )
 
         // If on stable, only check that the display name matches
