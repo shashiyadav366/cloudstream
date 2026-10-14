@@ -1,7 +1,9 @@
 package com.lagradost.cloudstream3.ui.player
 
+import androidx.annotation.OptIn
 import androidx.media3.common.ParserException
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker
 import androidx.media3.exoplayer.source.BehindLiveWindowException
@@ -64,6 +66,7 @@ object StreamPlaybackErrors {
     }
 
     /** First HTTP status code found in the cause chain, if any (safe to log). */
+    @OptIn(UnstableApi::class)
     fun httpStatus(error: Throwable): Int? =
         causeChain(error).filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()?.responseCode
@@ -73,6 +76,7 @@ object StreamPlaybackErrors {
      * and classifies the failure. Structural live errors and cancellation are recognized
      * first, then the HTTP status, then network/parser causes, then playback error codes.
      */
+    @OptIn(UnstableApi::class)
     fun classify(error: Throwable): StreamErrorKind {
         val chain = causeChain(error)
 

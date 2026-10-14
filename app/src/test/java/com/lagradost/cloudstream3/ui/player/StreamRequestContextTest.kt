@@ -188,4 +188,18 @@ class StreamRequestContextTest {
         assertEquals(mapOf("authorization" to "Basic YWRtaW46czNjcjN0", "Accept" to "*/*"), headers)
         assertEquals(1, headers.keys.count { it.equals("authorization", ignoreCase = true) })
     }
+
+    @Test
+    fun `moveUserInfoToBasicAuth treats user-info literally, not as a regex`() {
+        // `+`, `.` and `()` are regex metacharacters: a regex-based replaceFirst would
+        // either fail to strip the credentials or throw PatternSyntaxException.
+        val (uri, headers) = StreamRequestContext.moveUserInfoToBasicAuth(
+            rawUri = "http://user+tag:p.a(s)s@host/live.m3u8",
+            userInfo = "user+tag:p.a(s)s",
+            headers = emptyMap(),
+        )
+
+        assertEquals("http://host/live.m3u8", uri)
+        assertTrue(headers["Authorization"]?.startsWith("Basic ") == true)
+    }
 }

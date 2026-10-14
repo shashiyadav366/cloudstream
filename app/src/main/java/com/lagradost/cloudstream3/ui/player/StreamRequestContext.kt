@@ -48,8 +48,8 @@ data class StreamRequestContext(
     fun applyTo(dataSpec: DataSpec): DataSpec {
         val existing = dataSpec.httpRequestHeaders
         val merged = mergedRequestHeaders(existing)
-        val rawUri = dataSpec.uri?.toString()
-        val userInfo = rawUri?.let { userInfoFrom(it) }
+        val rawUri = dataSpec.uri.toString()
+        val userInfo = userInfoFrom(rawUri)
         if (userInfo != null) {
             val (cleanedUri, withAuth) = moveUserInfoToBasicAuth(rawUri, userInfo, merged)
             return dataSpec.buildUpon()
@@ -156,7 +156,9 @@ data class StreamRequestContext(
             userInfo: String,
             headers: Map<String, String>,
         ): Pair<String, Map<String, String>> {
-            val cleanedUri = rawUri.replaceFirst("$userInfo@", "")
+            // Literal removal: user-info may contain regex metacharacters (e.g. `+`, `.`,
+            // `(`), so it must not be interpreted as a pattern.
+            val cleanedUri = rawUri.replaceFirst(Regex.fromLiteral("$userInfo@"), "")
             val encoded = userInfo.encodeUtf8().base64()
             val withAuth = mergeHeaders(
                 base = headers,

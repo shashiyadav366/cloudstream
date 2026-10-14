@@ -5,16 +5,18 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.ResolvingDataSource
+import com.lagradost.cloudstream3.BuildConfig
 import okhttp3.OkHttpClient
 
 const val STREAM_REQUEST_LOG_TAG = "StreamRequestCtx"
 
 /**
- * Temporary diagnostic logging for verifying the stream request-context lifecycle.
- * Only hosts, query-less paths and header *names* are logged — never header values,
- * cookies, tokens or query strings.
+ * Diagnostic logging for verifying the stream request-context lifecycle. Only enabled in
+ * debug builds, so it never ships in release: R8 inlines [BuildConfig.DEBUG] and strips the
+ * dead logging branches. Only hosts, query-less paths and header *names* are logged — never
+ * header values, cookies, tokens or query strings.
  */
-const val STREAM_REQUEST_DEBUG_LOGS = true
+val STREAM_REQUEST_DEBUG_LOGS: Boolean get() = BuildConfig.DEBUG
 
 /**
  * Resolver applied to every request the Media3 HLS lifecycle generates for one stream
@@ -25,10 +27,14 @@ const val STREAM_REQUEST_DEBUG_LOGS = true
 @OptIn(UnstableApi::class)
 fun createStreamRequestResolver(context: StreamRequestContext): ResolvingDataSource.Resolver {
     return ResolvingDataSource.Resolver { dataSpec ->
-        val userInfoMoved =
-            StreamRequestContext.userInfoFrom(dataSpec.uri?.toString() ?: "") != null
         val resolved = context.applyTo(dataSpec)
-        logStreamRequest(resolved, context, userInfoMoved)
+        // The user-info scan is only needed to annotate the log line; skip it when
+        // diagnostics are off so the hot per-request path stays allocation-free.
+        if (STREAM_REQUEST_DEBUG_LOGS) {
+            val userInfoMoved =
+                StreamRequestContext.userInfoFrom(dataSpec.uri.toString()) != null
+            logStreamRequest(resolved, context, userInfoMoved)
+        }
         resolved
     }
 }
@@ -42,8 +48,8 @@ private fun logStreamRequest(
     if (!STREAM_REQUEST_DEBUG_LOGS) return
     try {
         val uri = dataSpec.uri
-        val path = uri?.path ?: ""
-        val host = uri?.host ?: "unknown"
+        val path = uri.path ?: ""
+        val host = uri.host ?: "unknown"
         val kind = when {
             path.endsWith(".m3u8", ignoreCase = true) -> "playlist"
             path.endsWith(".mpd", ignoreCase = true) -> "manifest"
