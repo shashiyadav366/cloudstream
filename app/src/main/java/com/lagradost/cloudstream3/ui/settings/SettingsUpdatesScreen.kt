@@ -408,7 +408,7 @@ object SettingsUpdatesScreen : SearchableSettings {
                         preference = settings.plugins.autoUpdate,
                     ),
 
-                    Preference.PreferenceItem.ListPreference(
+                    /*Preference.PreferenceItem.ListPreference(
                         title = stringResource(R.string.automatic_plugin_download),
                         subtitle = "%s\n" + stringResource(R.string.automatic_plugin_download_summary),
                         icon = painterResource(R.drawable.extention_renew2),
@@ -427,7 +427,7 @@ object SettingsUpdatesScreen : SearchableSettings {
                                 )
                             }
                         }
-                    ),
+                    ),*/
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(R.string.test_extensions),
                         subtitle = stringResource(R.string.test_extensions_summary),
