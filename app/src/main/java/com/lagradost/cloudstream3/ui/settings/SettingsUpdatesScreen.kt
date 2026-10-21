@@ -39,6 +39,7 @@ import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.MainActivityScreen
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.services.BackupWorkManager
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream3.utils.BackupUtils.restoreFromPath
@@ -359,7 +360,14 @@ object SettingsUpdatesScreen : SearchableSettings {
                             entries = integerArrayResource(R.array.periodic_work_values).zip(
                                 stringArrayResource(R.array.periodic_work_names)
                             ).toMap(),
-                            preference = settings.backup.frequency
+                            preference = settings.backup.frequency,
+                            onValueChanged = { value ->
+                                BackupWorkManager.enqueuePeriodicWork(
+                                    CloudStreamApp.context,
+                                    value.toLong()
+                                )
+                                return@ListPreference true
+                            }
                         )
                     )
                     // The local folder picker only applies to the Local destination.
