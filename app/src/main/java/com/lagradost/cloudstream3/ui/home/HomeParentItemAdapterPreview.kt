@@ -323,6 +323,9 @@ private val previewViewpagerText: ViewGroup =
 private val resumeHolder: View =
     itemView.findViewById(R.id.home_watch_holder)
 
+private val homePreviewShimmer: com.facebook.shimmer.ShimmerFrameLayout? =
+    itemView.findViewById(R.id.home_preview_shimmer)
+
 private val resumeRecyclerView: RecyclerView =
     itemView.findViewById(R.id.home_watch_child_recyclerview)
 
@@ -689,6 +692,8 @@ private val homeNonePadding: View =
 
             when (preview) {
                 is Resource.Success -> {
+                    homePreviewShimmer?.stopShimmer()
+                    homePreviewShimmer?.isGone = true
                     previewAdapter.submitList(preview.value.second)
                     previewAdapter.hasMoreItems = preview.value.first
                     /*if (!.setItems(
@@ -720,7 +725,16 @@ private val homeNonePadding: View =
                     }
                 }
 
+                is Resource.Loading -> {
+                    previewViewpager.isGone = true
+                    previewViewpagerText.isGone = true
+                    homePreviewShimmer?.isVisible = true
+                    homePreviewShimmer?.startShimmer()
+                }
+
                 else -> {
+                    homePreviewShimmer?.stopShimmer()
+                    homePreviewShimmer?.isGone = true
                     previewAdapter.submitList(listOf())
                     previewViewpager.setCurrentItem(0, false)
                     previewViewpager.isVisible = false

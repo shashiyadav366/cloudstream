@@ -25,6 +25,8 @@
             android:layout_height="match_parent"
             android:orientation="horizontal" />
 
+        <include layout="@layout/loading_hero_banner" />
+
         <!-- Search / refresh / profile header -->
         <LinearLayout
             android:id="@+id/home_padding"
