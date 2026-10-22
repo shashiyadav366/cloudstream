@@ -1,16 +1,24 @@
 package com.lagradost.cloudstream3.ui.settings.extensions
 
 import android.annotation.SuppressLint
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.text.format.Formatter.formatShortFileSize
 import android.util.Log
+import android.util.TypedValue
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.viewbinding.ViewBinding
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
+import com.google.android.material.color.MaterialColors
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.databinding.RepositoryItemBinding
@@ -45,10 +53,41 @@ class RepositoryViewHolderState(view: ViewBinding) : ViewHolderState<Any>(view) 
 }
 
 class PluginAdapter(
-    val showRepositoryNames: Boolean = false, val iconClickCallback: (PluginWrapper) -> Unit,
+    val showRepositoryNames: Boolean = false,
+    /** Only the per-repository plugins list shows the ignore (skip list) button. */
+    val showIgnoreButton: Boolean = false,
+    val iconClickCallback: (PluginWrapper) -> Unit,
+    val ignoreClickCallback: (PluginWrapper) -> Unit = {},
 ) : NoStateAdapter<PluginViewData>(diffCallback = BaseDiffCallback(itemSame = { a, b ->
     a.pluginWrapper.plugin.internalName == b.pluginWrapper.plugin.internalName && a.pluginWrapper.repositoryData.url == b.pluginWrapper.repositoryData.url
 })) {
+
+    /**
+     * Explicit ignored-state overrides set the moment the user taps the block button. They make the
+     * row redraw instantly instead of waiting for the (async, network-backed) list rebuild, and are
+     * cleared once a freshly built list is submitted.
+     */
+    private val pendingIgnored = mutableMapOf<String, Boolean>()
+
+    private fun ignoredKey(pluginWrapper: PluginWrapper): String {
+        return pluginWrapper.plugin.url + "|" + pluginWrapper.plugin.internalName
+    }
+
+    /**
+     * Applies an instant visual update after the ignored state of [pluginWrapper] changed, so the
+     * row does not wait for the list to be rebuilt.
+     */
+    fun setIgnored(pluginWrapper: PluginWrapper, ignored: Boolean) {
+        val key = ignoredKey(pluginWrapper)
+        pendingIgnored[key] = ignored
+        for (i in 0 until itemCount) {
+            val item = getItemOrNull(i) ?: continue
+            if (ignoredKey(item.pluginWrapper) == key) {
+                notifyItemChanged(i)
+            }
+        }
+    }
+
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Any> {
         val layout = if (isLayout(TV)) R.layout.repository_item_tv else R.layout.repository_item
         val inflated = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -77,10 +116,7 @@ class PluginAdapter(
         val metadata = item.pluginWrapper.plugin
         val disabled = metadata.status == PROVIDER_STATUS_DOWN
         val name = metadata.name.removeSuffix("Provider")
-        val alpha = if (disabled) 0.6f else 1f
         val isLocal = !item.pluginWrapper.plugin.url.startsWith("http")
-        binding.mainText.alpha = alpha
-        binding.subText.alpha = alpha
 
         binding.repositoryNameText.isVisible = showRepositoryNames
         if (showRepositoryNames) {
@@ -100,21 +136,49 @@ class PluginAdapter(
         binding.actionButton.setOnClickListener {
             iconClickCallback.invoke(item.pluginWrapper)
         }
-        itemView.setOnClickListener {
-            if (isLocal) return@setOnClickListener
 
+        // Ignore / block (skip list) toggle. Only shown on the per-repository plugins list; the
+        // top-level extensions list hides it. Blocking a plugin also uninstalls it, and while
+        // blocked it is skipped by auto-download, auto-update and batch install/uninstall.
+        binding.actionIgnore.isVisible = showIgnoreButton
+        val pendingKey = ignoredKey(item.pluginWrapper)
+        val realIgnored = PluginManager.isPluginIgnored(
+            metadata.internalName,
+            metadata.url
+        )
+        // The instant override is only needed until the persisted state catches up; drop it then.
+        if (pendingIgnored[pendingKey] == realIgnored) {
+            pendingIgnored.remove(pendingKey)
+        }
+        val ignored = pendingIgnored[pendingKey] ?: realIgnored
+        applyIgnoredStyle(binding, itemView, ignored && showIgnoreButton, disabled)
+        if (showIgnoreButton) {
+            // Always fully visible, the blocked state is shown by the dimmed row instead.
+            binding.actionIgnore.alpha = 1f
+            binding.actionIgnore.setImageResource(R.drawable.ic_baseline_block_24)
+            // Tint the icon red while the plugin is blocked, so the state is obvious.
+            binding.actionIgnore.imageTintList = if (ignored) {
+                ColorStateList.valueOf(
+                    ContextCompat.getColor(itemView.context, R.color.ignored_plugin_icon)
+                )
+            } else {
+                null
+            }
+            binding.actionIgnore.setOnClickListener {
+                ignoreClickCallback.invoke(item.pluginWrapper)
+            }
+        }
+
+        fun openDetails() {
+            if (isLocal) return
             val sheet = PluginDetailsFragment(item)
             val activity = itemView.context.getActivity() as AppCompatActivity
             sheet.show(activity.supportFragmentManager, "PluginDetails")
         }
-        //if (itemView.context?.isTrueTvSettings() == false) {
-        //    val siteUrl = metadata.repositoryUrl
-        //    if (siteUrl != null && siteUrl.isNotBlank() && siteUrl != "NONE") {
-        //        itemView.setOnClickListener {
-        //            openBrowser(siteUrl)
-        //        }
-        //    }
-        //}
+
+        itemView.setOnClickListener {
+            openDetails()
+        }
 
         if (item.isDownloaded) {
             // On local plugins page the filepath is provided instead of url.
@@ -203,9 +267,94 @@ class PluginAdapter(
             ) else txt(name)
         )
 
+        if (isLayout(TV)) {
+            // The plugin icon on the left has no action of its own, it only swallows the click
+            // so it does not open the plugin details.
+            binding.entryIcon.setOnClickListener {
+                // no-op
+            }
+
+            // Build the focus chain from the icons that are actually visible, so the D-pad
+            // never tries to jump to a hidden icon. The plugin icon on the left is not
+            // clickable, only the action icons on the right are.
+            val actions = listOfNotNull(
+                binding.actionIgnore.takeIf { showIgnoreButton && it.isVisible },
+                binding.actionSettings.takeIf { it.isVisible },
+                binding.actionButton.takeIf { it.isVisible },
+            )
+            actions.forEachIndexed { index, view ->
+                view.nextFocusLeftId =
+                    if (index == 0) itemView.id else actions[index - 1].id
+                // The last icon keeps its own nextFocusRight (eg. the add repo button).
+                if (index < actions.lastIndex) {
+                    view.nextFocusRightId = actions[index + 1].id
+                }
+            }
+            itemView.nextFocusRightId = actions.firstOrNull()?.id ?: View.NO_ID
+
+            applyTvRowFocus(
+                itemView,
+                binding.actionIgnore,
+                binding.actionSettings,
+                binding.actionButton,
+            )
+        }
+
         binding.subText.isGone = metadata.description.isNullOrBlank()
         binding.subText.text = metadata.description.html()
     }
+
+    /**
+     * Applies the "blocked" look: a dark overlay plus dimmed text/icon. Works for both the phone
+     * layout (root foreground) and the TV layout (card background), so it survives recycling.
+     */
+    private fun applyIgnoredStyle(
+        binding: RepositoryItemBinding,
+        itemView: View,
+        ignored: Boolean,
+        disabled: Boolean,
+    ) {
+        // The TV layout keeps a focus outline in the card foreground, so the card background is
+        // tinted instead. The phone layout uses the root foreground.
+        val card = itemView.findViewById<androidx.cardview.widget.CardView>(R.id.background_card)
+        if (card != null) {
+            card.setCardBackgroundColor(cardBackgroundColor(itemView, ignored))
+        } else if (ignored) {
+            itemView.foreground = ColorDrawable(fadedOverlayColor(itemView))
+        } else {
+            // Reset to transparent so the ripple still shows on the phone layout.
+            itemView.foreground = ColorDrawable(Color.TRANSPARENT)
+        }
+
+        // Dim the text while blocked, otherwise restore it (keeping the disabled-row dimming).
+        val textAlpha = when {
+            ignored -> 0.35f
+            disabled -> 0.6f
+            else -> 1f
+        }
+        binding.mainText.alpha = textAlpha
+        binding.subText.alpha = textAlpha
+    }
+
+    /**
+     * Resolves the themed card background. A blocked plugin gets a faded background, so it is less
+     * prominent. It is faded with the theme foreground, so it works on every theme.
+     */
+    private fun cardBackgroundColor(itemView: View, ignored: Boolean): Int {
+        val typed = TypedValue()
+        itemView.context.theme.resolveAttribute(R.attr.primaryGrayBackground, typed, true)
+        val cardColor = typed.data
+        if (!ignored) return cardColor
+        return ColorUtils.blendARGB(cardColor, fadedColor(itemView), 0.08f)
+    }
+
+    /** The theme foreground, which fades a blocked row on every theme. */
+    private fun fadedColor(itemView: View): Int =
+        MaterialColors.getColor(itemView, R.attr.textColor)
+
+    /** A faint wash of the theme foreground, for the layouts without a card. */
+    private fun fadedOverlayColor(itemView: View): Int =
+        ColorUtils.setAlphaComponent(fadedColor(itemView), 0x1A)
 
     companion object {
         // A high count as we can render in the entire list as the same time

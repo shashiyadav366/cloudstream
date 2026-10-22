@@ -2,6 +2,8 @@ package com.lagradost.cloudstream3.ui.settings
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
@@ -61,6 +63,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -190,6 +193,20 @@ object SettingsFragmentScreen : Screen {
 
         val outerListState = rememberScrollState()
 
+        // The screen we are leaving must not be able to take the focus back. The focus is cleared
+        // when the navigation happens and the framework then looks for a new focus target. This
+        // screen is still visible during the transition, so it would highlight the wrong item
+        // (the search bar or the "General" row) until the next screen is ready.
+        // Making the view not focusable keeps it out of the focus search of the framework, so
+        // the focus goes straight to the screen that is opened.
+        val view = LocalView.current as? View
+        val viewGroup = LocalView.current as? ViewGroup
+        fun leaveScreen(navigation: Int) {
+            view?.isFocusable = false
+            viewGroup?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            activity?.navigate(navigation)
+        }
+
         val parentFirstScrollConnection = remember {
             object : NestedScrollConnection {
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -264,14 +281,18 @@ object SettingsFragmentScreen : Screen {
                     deferredItems = ::generateSearchItems,
                     onItemClick = { item ->
                         SearchableSettings.highlightKey = item.highlightKey
-                        activity?.navigate(item.navigation)
+                        leaveScreen(item.navigation)
                     }, empty = {
                         Column(
                             modifier = Modifier
                                 .nestedScroll(parentFirstScrollConnection)
                         ) {
                             screens.forEach { settingsTab ->
-                                SettingsTab(settingsTab)
+                                SettingsTab(settingsTab) {
+                                    // Clear it if we have already set it but navigated back instantly
+                                    SearchableSettings.highlightKey = null
+                                    leaveScreen(settingsTab.navigation)
+                                }
                             }
                             BuildStamp()
                         }
@@ -440,7 +461,7 @@ object SettingsFragmentScreen : Screen {
     }
 
     @Composable
-    fun SettingsTab(settingsTab: SettingsNavigation) {
+    fun SettingsTab(settingsTab: SettingsNavigation, onClick: () -> Unit) {
         TextPreferenceWidget(
             title = stringResource(settingsTab.title),
             icon = painterResource(settingsTab.icon),
@@ -448,11 +469,7 @@ object SettingsFragmentScreen : Screen {
             subtitle =
                 @Suppress("SimplifiableCallChain")
                 settingsTab.subtitle.map { stringResource(it) }.joinToString(),
-            // Clear it if we have already set it but navigated back instantly
-            onPreferenceClick = {
-                SearchableSettings.highlightKey = null
-                activity?.navigate(settingsTab.navigation)
-            })
+            onPreferenceClick = onClick)
     }
 
     @Composable

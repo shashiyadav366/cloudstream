@@ -136,10 +136,11 @@ object BackupUtils {
         DOWNLOAD_EPISODE_CACHE_BACKUP,
         DOWNLOAD_EPISODE_CACHE,
         
-        // Download headers are unintuitively used in the resume watching system.
-        // We can therefore not prune download headers in backups.
-        // DOWNLOAD_HEADER_CACHE_BACKUP,
-        // DOWNLOAD_HEADER_CACHE,
+        // Download header cache is per-title resume metadata that accumulates without bound.
+        // It is deliberately kept out of backup files: nothing about the user's stream
+        // history should travel in a backup, and the file would grow with every title watched.
+        DOWNLOAD_HEADER_CACHE_BACKUP,
+        DOWNLOAD_HEADER_CACHE,
         
 
         // This may overwrite valid local data with invalid data

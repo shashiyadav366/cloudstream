@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_focused="true"
-          android:drawable="@drawable/outline"/> <!-- focused -->
+    <item android:state_focused="true" android:drawable="@drawable/outline"/>
+    <!-- Child views that opt in with duplicateParentState show the outline when the
+         focused row is marked selected/activated by a list adapter. -->
+    <item android:state_selected="true" android:drawable="@drawable/outline"/>
 </selector>

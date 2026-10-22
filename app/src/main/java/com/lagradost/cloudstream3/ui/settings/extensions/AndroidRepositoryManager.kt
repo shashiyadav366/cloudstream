@@ -134,7 +134,8 @@ object AndroidRepositoryManager : RepositoryManager {
                                 language
                             },
                             description = plugin.description,
-                            repositoryUrl = plugin.repositoryUrl
+                            repositoryUrl = plugin.repositoryUrl,
+                            ignored = PluginManager.isPluginIgnored(plugin.internalName, plugin.url)
                         ),
                         source = PluginDownloadSource(
                             size = plugin.fileSize,
@@ -264,6 +265,26 @@ object AndroidRepositoryManager : RepositoryManager {
 
     override suspend fun deletePlugin(location: String) {
         deletePlugin(File(location))
+    }
+
+    override suspend fun ignorePlugin(
+        internalName: String,
+        pluginUrl: String?,
+        location: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        PluginManager.ignorePluginAndUninstall(
+            internalName,
+            pluginUrl,
+            location?.let { File(it) }
+        )
+    }
+
+    override fun unignorePlugin(internalName: String, pluginUrl: String?) {
+        PluginManager.unignorePlugin(internalName, pluginUrl)
+    }
+
+    override fun isPluginIgnored(internalName: String, pluginUrl: String?): Boolean {
+        return PluginManager.isPluginIgnored(internalName, pluginUrl)
     }
 
     override suspend fun deleteRepository(repository: RepositoryInfo) {

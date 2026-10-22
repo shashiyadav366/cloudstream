@@ -163,7 +163,7 @@
     <string name="start_paused_settings">Start videos paused</string>
     <string name="start_paused_settings_des">Reduce stress when selecting sources</string>
     <string name="watch_history_settings">Watch history</string>
-    <string name="watch_history_settings_des">Save watch progress and show it in Continue watching. Applies to movies and series only, not live streams or NSFW.</string>
+    <string name="watch_history_settings_des">Save watch progress and show it in Continue watching for all content.</string>
     <string name="double_tap_to_seek_settings">Double tap to seek</string>
     <string name="double_tap_to_pause_settings">Double tap to pause</string>
     <string name="double_tap_to_seek_amount_settings">Player seek amount (Seconds)</string>
@@ -536,6 +536,12 @@
     <string name="plugin_downloaded">Plugin Downloaded</string>
     <string name="plugin_deleted">Plugin Deleted</string>
     <string name="plugin_load_fail" formatted="true">Could not load %s</string>
+    <string name="extension_ignore">Ignore plugin</string>
+    <string name="extension_unignore">Stop ignoring plugin</string>
+    <string name="extension_ignored_toast" formatted="true">%s ignored and uninstalled. It will be skipped by install and uninstall.</string>
+    <string name="extension_unignored_toast" formatted="true">%s is no longer ignored</string>
+    <string name="extension_ignored_install_blocked" formatted="true">%s is ignored. Un-ignore it first to install.</string>
+    <string name="extension_ignored">Ignored</string>
     <string name="is_adult">18+</string>
     <string name="batch_download_start_format" formatted="true">Started downloading %1$d %2$s…</string>
     <string name="batch_download_finish_format" formatted="true">Downloaded %1$d %2$s</string>

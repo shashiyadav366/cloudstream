@@ -21,6 +21,7 @@ import com.lagradost.cloudstream4.state.SortByName
 import com.lagradost.cloudstream4.state.StateContainer
 import com.lagradost.cloudstream4.state.UniqueItem
 import com.lagradost.cloudstream4.state.sortByInt
+import com.lagradost.cloudstream4.viewmodels.ExtensionsEffect.PluginIgnored
 import com.lagradost.cloudstream4.viewmodels.ExtensionsEffect.RepositoryAdded
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.PersistentMap
@@ -94,6 +95,8 @@ data class PluginInfo(
      * This is different from source.repositoryUrl,
      * as this may be a different url than the repo we got this from */
     val repositoryUrl: String?,
+    /** The user marked this plugin as ignored, it is skipped by install and update. */
+    val ignored: Boolean = false,
 )
 
 @Immutable
@@ -395,6 +398,7 @@ data class AddRepositoryDialog(
 
 sealed class ExtensionsEffect {
     data class RepositoryAdded(val repository: RepositoryInfo, val uuid: Uuid) : ExtensionsEffect()
+    data class PluginIgnored(val name: String, val success: Boolean, val nowIgnored: Boolean) : ExtensionsEffect()
 }
 
 @InternalAPI
@@ -412,6 +416,20 @@ interface RepositoryManager {
 
     @Throws
     suspend fun deletePlugin(location: String)
+
+    /** Marks the plugin as ignored and uninstalls it if it is installed. */
+    @Throws
+    suspend fun ignorePlugin(
+        internalName: String,
+        pluginUrl: String?,
+        location: String?,
+    ): Boolean
+
+    /** Removes the plugin from the ignore (skip) list. Does not install it. */
+    fun unignorePlugin(internalName: String, pluginUrl: String?)
+
+    /** Whether the user marked the plugin as ignored, it is skipped by install and update. */
+    fun isPluginIgnored(internalName: String, pluginUrl: String?): Boolean
 
     @Throws
     suspend fun deleteRepository(repository: RepositoryInfo)
@@ -432,6 +450,9 @@ sealed class ExtensionsAction {
     data class DeletePluginsInRepository(val uuid: Uuid) : ExtensionsAction()
     data class DeletePlugin(val uuid: Uuid) : ExtensionsAction()
     data class DownloadPlugin(val uuid: Uuid) : ExtensionsAction()
+    data class IgnorePlugin(val uuid: Uuid) : ExtensionsAction()
+    data class UnignorePlugin(val uuid: Uuid) : ExtensionsAction()
+    data class DownloadAllPlugins(val uuid: Uuid) : ExtensionsAction()
 
     //data class DownloadRepository(val repository: RepositoryInfo) : ExtensionsAction()
     data class DownloadRepositoryWithDialog(val url: String) : ExtensionsAction()
@@ -625,6 +646,42 @@ class ExtensionsViewModel2(
                 val plugin = state.value.plugins[action.uuid] ?: return
                 viewModelScope.launch {
                     deletePlugin(plugin)
+                }
+            }
+
+            is ExtensionsAction.IgnorePlugin -> {
+                val plugin = state.value.plugins[action.uuid] ?: return
+                viewModelScope.launch {
+                    val ignored = manager.ignorePlugin(
+                        plugin.info.internalName,
+                        plugin.source?.pluginUrl,
+                        plugin.downloadLocation
+                    )
+                    updateState {
+                        copy(plugins = plugins.updating(plugin.uuid) {
+                            copy(info = info.copy(ignored = ignored), downloadLocation = null)
+                        })
+                    }
+                    postEffect { PluginIgnored(plugin.info.name, ignored, ignored) }
+                }
+            }
+
+            is ExtensionsAction.DownloadAllPlugins -> {
+                viewModelScope.launch {
+                    downloadAllPlugins(action.uuid)
+                }
+            }
+
+            is ExtensionsAction.UnignorePlugin -> {
+                val plugin = state.value.plugins[action.uuid] ?: return
+                viewModelScope.launch {
+                    manager.unignorePlugin(plugin.info.internalName, plugin.source?.pluginUrl)
+                    updateState {
+                        copy(plugins = plugins.updating(plugin.uuid) {
+                            copy(info = info.copy(ignored = false))
+                        })
+                    }
+                    postEffect { PluginIgnored(plugin.info.name, true, false) }
                 }
             }
 
@@ -858,6 +915,22 @@ class ExtensionsViewModel2(
                     copy(addDialog = null)
                 }
                 postEffect { RepositoryAdded(newRepositoryInfo, uuid) }
+            }
+        }
+    }
+
+    /** Installs every plugin of the repository that is not installed yet. */
+    private suspend fun downloadAllPlugins(repositoryUuid: Uuid) = updatePluginsDispatcher.launch {
+        val repositoryPlugins = state.value.plugins.data.values.filter {
+            it.repository == repositoryUuid && it.downloadLocation == null
+        }
+        // Ignored plugins are on the skip list: never batch-install them.
+        val toDownload = repositoryPlugins.filter {
+            !manager.isPluginIgnored(it.info.internalName, it.source?.pluginUrl)
+        }
+        for (plugin in toDownload) {
+            downloadDispatcher.launch(plugin.uuid) {
+                downloadPlugin(plugin)
             }
         }
     }

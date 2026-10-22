@@ -70,6 +70,24 @@ import java.io.InputStreamReader
 const val PLUGINS_KEY = "PLUGINS_KEY"
 const val PLUGINS_KEY_LOCAL = "PLUGINS_KEY_LOCAL"
 
+/**
+ * Set of plugin-scoped keys the user marked as "ignored". Ignored plugins are never
+ * auto-downloaded, never auto-updated, never bulk-downloaded and never bulk-deleted.
+ *
+ * A key is the plugin's download url and [PluginData.internalName] separated by a pipe (`|`).
+ * The plugin url is part of the key because different repositories may contain plugins with the
+ * same internal name, and blocking one must not block the other. Local plugins (whose url is a
+ * file path) are keyed by internal name only. Legacy entries without the separator are still
+ * accepted.
+ *
+ * Stored as a JSON string through the normal [setKey] path, so it is included in app backups
+ * automatically and restored on import.
+ *
+ * NOTE: the name deliberately avoids the substring "PLUGINS_KEY" because [BackupUtils] filters
+ * non-transferable keys by substring match.
+ */
+const val IGNORED_PLUGINS_KEY = "IGNORED_EXTENSION_SKIP_LIST"
+
 const val EXTENSIONS_CHANNEL_ID = "cloudstream3.extensions"
 const val EXTENSIONS_CHANNEL_NAME = "Extensions"
 const val EXTENSIONS_CHANNEL_DESCRIPT = "Extension notification channel"
@@ -196,6 +214,92 @@ object PluginManager {
         return getKey<Array<PluginData>>(PLUGINS_KEY_LOCAL) ?: emptyArray()
     }
 
+    /**
+     * Separates the plugin url from the internal name in the ignore (skip) list.
+     *
+     * Different repositories can contain plugins with the same internal name. Scoping the entry
+     * by plugin url ensures that blocking one of those plugins does not block the other one too.
+     */
+    private const val IGNORED_PLUGIN_KEY_SEPARATOR = "|"
+
+    private fun getIgnoredPluginKey(internalName: String, pluginUrl: String?): String {
+        return if (pluginUrl.isNullOrBlank() || !pluginUrl.startsWith("http")) {
+            internalName
+        } else {
+            "$pluginUrl$IGNORED_PLUGIN_KEY_SEPARATOR$internalName"
+        }
+    }
+
+    /** Raw keys of all plugins the user marked as ignored (the skip list). */
+    fun getIgnoredPluginNames(): Set<String> {
+        return getKey<Set<String>>(IGNORED_PLUGINS_KEY) ?: emptySet()
+    }
+
+    /**
+     * Checks whether the plugin identified by [pluginUrl] and [internalName] is ignored.
+     *
+     * Entries without a plugin url prefix are legacy entries from before ignore was plugin-scoped;
+     * they are still honoured so existing skip lists keep working.
+     */
+    fun isPluginIgnored(internalName: String, pluginUrl: String? = null): Boolean {
+        val ignored = getIgnoredPluginNames()
+        return ignored.contains(getIgnoredPluginKey(internalName, pluginUrl)) ||
+                ignored.contains(internalName)
+    }
+
+    /**
+     * Marks a plugin as ignored and uninstalls it if present. Being ignored means the plugin is
+     * skipped by auto-download, auto-update and batch install/uninstall until it is un-ignored.
+     *
+     * @param internalName the plugin's stable id, added to the skip list even if not installed.
+     * @param pluginUrl the plugin's download url, so another plugin with the same [internalName]
+     * stays unaffected. Null or a file path for local plugins.
+     * @param file the installed plugin file, deleted if it exists. Null if it is not installed.
+     * @return true if the plugin is now ignored.
+     */
+    suspend fun ignorePluginAndUninstall(
+        internalName: String,
+        pluginUrl: String?,
+        file: File?,
+    ): Boolean {
+        // Add to the skip list first, so even an uninstalled plugin is remembered as ignored.
+        // Drop any legacy unscoped entry for this name so blocking is plugin-specific from now on.
+        val previousIgnored = getIgnoredPluginNames()
+        val key = getIgnoredPluginKey(internalName, pluginUrl)
+        setKey(IGNORED_PLUGINS_KEY, (previousIgnored - internalName) + key)
+
+        if (file == null) return true
+        val list =
+            (getPluginsLocal() + getPluginsOnline()).filter { it.filePath == file.absolutePath }
+        if (!file.exists()) return true
+
+        return try {
+            if (file.delete()) {
+                unloadPlugin(file.absolutePath)
+                list.forEach { deletePluginData(it) }
+                true
+            } else {
+                // Delete failed; restore the skip list so we do not leave it half-ignored.
+                setKey(IGNORED_PLUGINS_KEY, previousIgnored)
+                false
+            }
+        } catch (e: Exception) {
+            logError(e)
+            setKey(IGNORED_PLUGINS_KEY, previousIgnored)
+            false
+        }
+    }
+
+    /** Removes a plugin from the ignore (skip) list. Does not install it. */
+    fun unignorePlugin(internalName: String, pluginUrl: String? = null) {
+        val ignored = getIgnoredPluginNames()
+        // Also remove a legacy unscoped entry so an old global block can be cleared.
+        setKey(
+            IGNORED_PLUGINS_KEY,
+            ignored - getIgnoredPluginKey(internalName, pluginUrl) - internalName
+        )
+    }
+
     private val CLOUD_STREAM_FOLDER =
         Environment.getExternalStorageDirectory().absolutePath + "/Cloudstream3/"
 
@@ -316,6 +420,14 @@ object PluginManager {
         val updatedPlugins = mutableListOf<String>()
 
         outdatedPlugins.amap { pluginData ->
+            if (isPluginIgnored(
+                    pluginData.savedData.internalName,
+                    pluginData.savedData.url ?: pluginData.onlineData.plugin.url
+                )
+            ) {
+                // Never update an ignored plugin; it stays exactly as installed.
+                return@amap
+            }
             if (pluginData.isDisabled) {
                 //updatedPlugins.add(activity.getString(R.string.single_plugin_disabled, pluginData.onlineData.second.name))
                 unloadPlugin(pluginData.savedData.filePath)
@@ -432,6 +544,13 @@ object PluginManager {
         //Log.i(TAG, "notDownloadedPlugins => ${notDownloadedPlugins.toJson()}")
 
         notDownloadedPlugins.amap { pluginData ->
+            if (isPluginIgnored(
+                    pluginData.savedData.internalName,
+                    pluginData.onlineData.plugin.url
+                )
+            ) {
+                return@amap
+            }
             downloadPlugin(
                 activity,
                 pluginData.onlineData.plugin.url,
@@ -787,6 +906,12 @@ object PluginManager {
         file: File,
         loadPlugin: Boolean,
     ): Boolean {
+        // Central ignore guard: every download path (manual, bulk, auto-download, auto-update)
+        // funnels through here, so an ignored plugin can never be (re)installed by any of them.
+        if (isPluginIgnored(internalName, pluginUrl)) {
+            Log.i(TAG, "Skipping download of ignored plugin: $internalName")
+            return false
+        }
         try {
             Log.d(TAG, "Downloading plugin: $pluginUrl to ${file.absolutePath}")
             // The plugin file needs to be salted with the repository url hash as to allow multiple repositories with the same internal plugin names
@@ -820,6 +945,16 @@ object PluginManager {
     suspend fun deletePlugin(file: File): Boolean {
         val list =
             (getPluginsLocal() + getPluginsOnline()).filter { it.filePath == file.absolutePath }
+
+        // Central ignore guard: an ignored plugin is already uninstalled and skipped, so it must
+        // never be touched by batch uninstall either.
+        val isIgnored = list.any { pluginData ->
+            isPluginIgnored(pluginData.internalName, pluginData.url)
+        }
+        if (isIgnored) {
+            Log.i(TAG, "Skipping delete of ignored plugin: ${file.absolutePath}")
+            return false
+        }
 
         return try {
             if (File(file.absolutePath).delete()) {
@@ -865,6 +1000,19 @@ object PluginManager {
         val updatedPlugins = mutableListOf<String>()
 
         allPlugins.amap { pluginData ->
+            if (isPluginIgnored(
+                    pluginData.savedData.internalName,
+                    pluginData.savedData.url ?: pluginData.onlineData.plugin.url
+                )
+            ) {
+                val existingFile = File(pluginData.savedData.filePath)
+                if (existingFile.exists()) {
+                    existingFile.delete()
+                    unloadPlugin(pluginData.savedData.filePath)
+                }
+                deletePluginData(pluginData.savedData)
+                return@amap
+            }
             if (pluginData.isDisabled) {
                 Log.e(
                     "PluginManager",

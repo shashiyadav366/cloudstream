@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Outline that is only drawn while the view itself has the focus.
+     Used for the icons of a row, so only the focused icon is highlighted. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true"
+          android:drawable="@drawable/outline"/> <!-- focused -->
+</selector>

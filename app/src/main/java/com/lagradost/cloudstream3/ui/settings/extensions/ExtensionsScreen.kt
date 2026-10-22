@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.lagradost.cloudstream3.ui.settings.extensions
 
 import android.annotation.SuppressLint
@@ -44,10 +46,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
@@ -74,6 +76,7 @@ import androidx.compose.ui.focus.FocusRequester.Companion.FocusRequesterFactory.
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
@@ -99,6 +102,7 @@ import com.fasterxml.jackson.core.JacksonException
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.openBrowser
 import com.lagradost.cloudstream3.CommonActivity.activity
+import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
@@ -145,16 +149,19 @@ import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.CancelPluginsUpdat
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.ClearPluginSearch
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.DeletePlugin
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.DeleteRepository
+import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.DownloadAllPlugins
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.DownloadPlugin
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.DownloadRepositoryWithDialog
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.FilterByInverseLanguages
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.FilterByTypes
+import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.IgnorePlugin
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.Init
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.ReloadRepository
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.Search
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.SelectPlugin
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.SelectRepository
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.SetRepositoryDialog
+import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.UnignorePlugin
 import com.lagradost.cloudstream4.viewmodels.ExtensionsAction.UpdateAllPlugins
 import com.lagradost.cloudstream4.viewmodels.ExtensionsEffect
 import com.lagradost.cloudstream4.viewmodels.ExtensionsState
@@ -265,6 +272,22 @@ object ExtensionsScreen : Screen {
                 is ExtensionsEffect.RepositoryAdded -> {
                     highLight.value = effect.uuid
                 }
+
+                is ExtensionsEffect.PluginIgnored -> {
+                    val act = activity
+                    if (!effect.success) {
+                        showToast(act, act?.getString(R.string.error))
+                    } else {
+                        showToast(
+                            act,
+                            act?.getString(
+                                if (effect.nowIgnored) R.string.extension_ignored_toast
+                                else R.string.extension_unignored_toast,
+                                effect.name
+                            )
+                        )
+                    }
+                }
             }
         }
         Content(state = state, onAction = viewModel::onAction, highLightState = highLight)
@@ -333,6 +356,24 @@ object ExtensionsScreen : Screen {
         val clipboard = LocalClipboard.current
 
         var extraDialog by remember { mutableStateOf(false) }
+        val selectedRepository = state.pluginFilter.repository
+        val repositoryState = selectedRepository?.let { state.plugins.state.repositories[it] }
+        if (selectedRepository != null && repositoryState != null) {
+            // Only show the buttons when there is something to install or to delete, otherwise
+            // they just clutter the bar.
+            if (repositoryState.notDownloaded > 0) {
+                WhiteIconButton(
+                    onClick = {
+                        onAction(DownloadAllPlugins(selectedRepository))
+                    }) {
+                    Icon(
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        painter = painterResource(R.drawable.netflix_download),
+                        contentDescription = stringResource(R.string.batch_download)
+                    )
+                }
+            }
+        }
         if (!state.searchPlugins) {
             if (isLayout(TV)) {
                 WhiteIconButton(
@@ -1075,7 +1116,20 @@ object ExtensionsScreen : Screen {
                 .focusRequester(backgroundFocusRequester)
                 .focusProperties {
                     end = buttonsFocusRequester
-                },
+                }
+                .then(
+                    if (plugin.info.ignored) {
+                        // The blocked look of the view based list: a faded background and
+                        // dimmed text, the same on every device and theme.
+                        Modifier
+                            .background(
+                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+                            )
+                            .alpha(0.35f)
+                    } else {
+                        Modifier
+                    }
+                ),
             title =
                 if (isPluginDisabledByAuthor) {
                     stringResource(R.string.single_plugin_disabled, plugin.info.name)
@@ -1221,6 +1275,40 @@ object ExtensionsScreen : Screen {
             val (button1FocusRequester, button2FocusRequester) = remember {
                 FocusRequester.createRefs()
             }
+            val blockFocusRequester = remember { FocusRequester() }
+
+            WhiteIconButton(
+                modifier = Modifier
+                    .focusRequester(blockFocusRequester)
+                    .focusProperties {
+                        start = returnFocusRequester
+                        end = if (settings == null) {
+                            button2FocusRequester
+                        } else {
+                            button1FocusRequester
+                        }
+                    },
+                onClick = {
+                    if (plugin.info.ignored) {
+                        onAction(UnignorePlugin(plugin.uuid))
+                    } else {
+                        onAction(IgnorePlugin(plugin.uuid))
+                    }
+                },
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_baseline_block_24),
+                    contentDescription = stringResource(
+                        if (plugin.info.ignored) R.string.extension_unignore
+                        else R.string.extension_ignore
+                    ),
+                    tint = if (plugin.info.ignored) {
+                        colorResource(R.color.ignored_plugin_icon)
+                    } else {
+                        MaterialTheme.colorScheme.onBackground
+                    },
+                )
+            }
 
             if (settings != null) {
                 val context = LocalContext.current
@@ -1228,7 +1316,7 @@ object ExtensionsScreen : Screen {
                     modifier = Modifier
                         .focusRequester(button1FocusRequester)
                         .focusProperties {
-                            start = returnFocusRequester
+                            start = blockFocusRequester
                             end = button2FocusRequester
                         },
                     onClick = {
@@ -1255,7 +1343,7 @@ object ExtensionsScreen : Screen {
                     .focusRequester(button2FocusRequester)
                     .focusProperties {
                         start = if (settings == null) {
-                            returnFocusRequester
+                            blockFocusRequester
                         } else {
                             button1FocusRequester
                         }
@@ -1291,14 +1379,14 @@ object ExtensionsScreen : Screen {
                                     status.progress.toFloat() / total.toFloat()
                                 },
                                 modifier = Modifier
-                                    .size(IconButtonDefaults.smallContainerSize())
+                                    .size(40.dp)
                                     .padding(MaterialTheme.padding.small),
                                 color = MaterialTheme.colorScheme.onBackground,
                             )
                         } else {
                             CircularProgressIndicator(
                                 modifier = Modifier
-                                    .size(IconButtonDefaults.smallContainerSize())
+                                    .size(40.dp)
                                     .padding(MaterialTheme.padding.small),
                                 color = MaterialTheme.colorScheme.onBackground,
                             )
@@ -1872,7 +1960,7 @@ object ExtensionsScreen : Screen {
                             )
                             /*CircularProgressIndicator(
                                 modifier = Modifier
-                                    .size(IconButtonDefaults.smallContainerSize())
+                                    .size(40.dp)
                                     .padding(MaterialTheme.padding.small),
                                 color = MaterialTheme.colorScheme.onBackground,
                             )*/

@@ -95,11 +95,16 @@ class PluginsViewModel : ViewModel() {
                 val plugins = getPlugins(repository)
 
                 plugins.filter { pluginWrapper ->
-                    !isDownloaded(
-                        activity,
+                    // Ignored plugins are on the skip list: never batch-install them.
+                    !PluginManager.isPluginIgnored(
                         pluginWrapper.plugin.internalName,
-                        repository.url
-                    )
+                        pluginWrapper.plugin.url
+                    ) &&
+                        !isDownloaded(
+                            activity,
+                            pluginWrapper.plugin.internalName,
+                            repository.url
+                        )
                 }.also { list ->
                     main {
                         showToast(
@@ -158,11 +163,16 @@ class PluginsViewModel : ViewModel() {
                 val plugins = getPlugins(repository)
 
                 plugins.filter { pluginWrapper ->
-                    isDownloaded(
-                        activity,
+                    // Ignored plugins are on the skip list: never batch-uninstall them.
+                    !PluginManager.isPluginIgnored(
                         pluginWrapper.plugin.internalName,
-                        repository.url
-                    )
+                        pluginWrapper.plugin.url
+                    ) &&
+                        isDownloaded(
+                            activity,
+                            pluginWrapper.plugin.internalName,
+                            repository.url
+                        )
                 }.also { list ->
                     main {
                         showToast(
@@ -232,6 +242,25 @@ class PluginsViewModel : ViewModel() {
             pluginWrapper.repositoryData.url
         )
 
+        // An ignored plugin is on the skip list. It cannot be installed until it is un-ignored.
+        if (!file.exists() && !isLocal && PluginManager.isPluginIgnored(
+                metadata.internalName,
+                metadata.url
+            )
+        ) {
+            val act = activity
+            runOnMainThread {
+                showToast(
+                    act.getString(
+                        R.string.extension_ignored_install_blocked,
+                        metadata.name.removeSuffix("Provider")
+                    ),
+                    Toast.LENGTH_SHORT
+                )
+            }
+            return@ioSafe
+        }
+
         val (success, message) = if (file.exists()) {
             PluginManager.deletePlugin(file) to R.string.plugin_deleted
         } else {
@@ -259,6 +288,63 @@ class PluginsViewModel : ViewModel() {
                 updatePluginListLocal()
             else
                 updatePluginListPrivate(activity, repositoryUrls)
+    }
+
+    /**
+     * Toggles the "ignored" (skip list) state of a plugin.
+     *
+     * Ignoring adds the plugin to the skip list and uninstalls it. While ignored the plugin is
+     * skipped by auto-download, auto-update and batch install/uninstall. Un-ignoring only removes
+     * it from the skip list; it stays uninstalled until the user installs it again.
+     */
+    fun handleIgnoreAction(
+        activity: Activity?,
+        repositoryUrls: List<RepositoryData>,
+        pluginWrapper: PluginWrapper,
+        isLocal: Boolean
+    ) = ioSafe {
+        Log.i(TAG, "handleIgnoreAction = $repositoryUrls, $pluginWrapper, $isLocal")
+
+        if (activity == null) return@ioSafe
+        val (_, _, metadata) = pluginWrapper
+        val internalName = metadata.internalName
+        val pluginUrl = metadata.url
+        val shortName = metadata.name.removeSuffix("Provider")
+
+        if (PluginManager.isPluginIgnored(internalName, pluginUrl)) {
+            PluginManager.unignorePlugin(internalName, pluginUrl)
+            runOnMainThread {
+                showToast(
+                    activity.getString(R.string.extension_unignored_toast, shortName),
+                    Toast.LENGTH_SHORT
+                )
+            }
+        } else {
+            val file = if (isLocal) File(pluginWrapper.plugin.url) else getPluginPath(
+                activity,
+                internalName,
+                pluginWrapper.repositoryData.url
+            )
+            val success = PluginManager.ignorePluginAndUninstall(
+                internalName,
+                pluginUrl,
+                file
+            )
+            runOnMainThread {
+                if (success)
+                    showToast(
+                        activity.getString(R.string.extension_ignored_toast, shortName),
+                        Toast.LENGTH_SHORT
+                    )
+                else
+                    showToast(R.string.error, Toast.LENGTH_SHORT)
+            }
+        }
+
+        if (isLocal)
+            updatePluginListLocal()
+        else
+            updatePluginListPrivate(activity, repositoryUrls)
     }
 
     private suspend fun updatePluginListPrivate(context: Context, repositories: List<RepositoryData>) {

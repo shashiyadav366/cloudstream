@@ -2418,8 +2418,14 @@ class ResultViewModel2 : ViewModel() {
         val resume = getLastWatched(correctId)
         val resumeParentId = resume?.parentId
         if (resumeParentId != correctId) return null // is null or smth went wrong with getLastWatched
-        val resumeId = resume.episodeId ?: return null// invalid episode id
         val response = currentResponse ?: return null
+        if (response.type.isLiveStream()) {
+            val episode = currentEpisodes.values.flatten().firstOrNull() ?: getMovie()
+            if (episode == null) return null
+            val isMovie = response.isMovie()
+            return ResumeWatchingStatus(progress = null, isMovie = isMovie, result = episode)
+        }
+        val resumeId = resume.episodeId ?: return null// invalid episode id
         // kinda ugly ik
         val episode =
             currentEpisodes.values.flatten().firstOrNull { it.id == resumeId } ?: return null
@@ -2521,9 +2527,11 @@ class ResultViewModel2 : ViewModel() {
 
             when (autostart.startAction) {
                 START_ACTION_RESUME_LATEST -> {
+                    // Live streams do not track watch progress, so never skip them
+                    val isLive = currentResponse?.type?.isLiveStream() == true
                     currentEpisodes[currentIndex]?.let { currentRange ->
                         for (ep in currentRange) {
-                            if (ep.getWatchProgress() > 0.9) continue
+                            if (!isLive && ep.getWatchProgress() > 0.9) continue
                             handleAction(
                                 EpisodeClickEvent(
                                     getPlayerAction(activity),

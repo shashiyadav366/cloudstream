@@ -417,13 +417,61 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 if (nextFocusUp != null)
                     button?.nextFocusUpId = nextFocusUp
 
-                button?.setOnCheckedChangeListener { _, _ ->
-                    val list = ArrayList<TvType>()
+                button?.setOnCheckedChangeListener { _, isChecked ->
+                    if (types.contains(TvType.NSFW)) {
+                        if (isChecked) {
+                            // If NSFW selected, uncheck all others
+                            for ((sbutton, _) in pairList) {
+                                if (sbutton != button) {
+                                    sbutton?.setOnCheckedChangeListener(null)
+                                    sbutton?.isChecked = false
+                                    sbutton?.setOnCheckedChangeListener { v, c ->
+                                        val p = pairList.find { it.first == v } ?: return@setOnCheckedChangeListener
+                                        // re-trigger
+                                        v.isChecked = c
+                                    }
+                                }
+                            }
+                            callback(listOf(TvType.NSFW))
+                            return@setOnCheckedChangeListener
+                        } else {
+                            // If NSFW unchecked, select all others that are valid
+                            val result = ArrayList<TvType>()
+                            for ((sbutton, vvalidTypes) in pairList) {
+                                if (sbutton == button) continue
+                                val isValidBtn = validTypes.any { vvalidTypes.contains(it) }
+                                if (isValidBtn) {
+                                    sbutton?.setOnCheckedChangeListener(null)
+                                    sbutton?.isChecked = true
+                                    sbutton?.setOnCheckedChangeListener { v, c ->
+                                        val p = pairList.find { it.first == v } ?: return@setOnCheckedChangeListener
+                                        v.isChecked = c
+                                    }
+                                    result.addAll(vvalidTypes)
+                                }
+                            }
+                            callback(result)
+                            return@setOnCheckedChangeListener
+                        }
+                    } else {
+                        // Another chip was checked -> if NSFW is currently checked, uncheck NSFW
+                        val nsfwPair = pairList.find { it.second.contains(TvType.NSFW) }
+                        val nsfwButton = nsfwPair?.first
+                        if (nsfwButton?.isChecked == true) {
+                            nsfwButton.setOnCheckedChangeListener(null)
+                            nsfwButton.isChecked = false
+                            nsfwButton.setOnCheckedChangeListener { v, c ->
+                                val p = pairList.find { it.first == v } ?: return@setOnCheckedChangeListener
+                                v.isChecked = c
+                            }
+                        }
+                    }
+                    val result = ArrayList<TvType>()
                     for ((sbutton, vvalidTypes) in pairList) {
                         if (sbutton?.isChecked == true)
-                            list.addAll(vvalidTypes)
+                            result.addAll(vvalidTypes)
                     }
-                    callback(list)
+                    callback(result)
                 }
             }
         }

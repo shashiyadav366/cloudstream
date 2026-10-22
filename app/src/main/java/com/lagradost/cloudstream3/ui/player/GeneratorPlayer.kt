@@ -2004,11 +2004,22 @@ class GeneratorPlayer : FullScreenPlayer() {
     var maxEpisodeSet: Int? = null
     var hasRequestedStamps: Boolean = false
     override fun playerPositionChanged(position: Long, duration: Long) {
-        // Don't save livestream data
-        if ((currentMeta as? ResultEpisode)?.tvType?.isLiveStream() == true) return
-
-        // Don't save NSFW data
-        if ((currentMeta as? ResultEpisode)?.tvType == TvType.NSFW) return
+        // Live streams have no meaningful progress. The Continue Watching entry is created
+        // once below (see setViewPosAndResume), and nothing else runs per tick.
+        // NSFW static videos are seekable and follow the normal progress path.
+        if (!isIncognito) {
+            val isLiveStream = (currentMeta as? ResultEpisode)?.tvType?.isLiveStream() == true
+            if (isLiveStream) {
+                DataStoreHelper.setViewPosAndResume(
+                    viewModel.state.generatorState?.id,
+                    position,
+                    duration,
+                    currentMeta,
+                    nextMeta
+                )
+                return
+            }
+        }
 
         if (duration <= 0L) return // idk how you achieved this, but div by zero crash
         if (!hasRequestedStamps) {

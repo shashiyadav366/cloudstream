@@ -6,6 +6,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
+    android:foreground="@android:color/transparent"
     android:nextFocusRight="@id/action_button"
     android:orientation="horizontal"
     android:padding="12dp">
@@ -112,6 +113,19 @@
             style="@style/SmallBlackButton"
             tools:text="Repository name" />
     </LinearLayout>
+
+    <ImageView
+        android:id="@+id/action_ignore"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="10dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/extension_ignore"
+        android:padding="12dp"
+        android:src="@drawable/ic_baseline_block_24"
+        android:visibility="gone"
+        tools:visibility="visible" />
 
     <ImageView
         android:id="@+id/action_settings"

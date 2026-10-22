@@ -45,6 +45,10 @@
 
     <color name="adultColor">#FF6F63</color> <!-- same as sub color -->
 
+    <!-- Dark overlay applied to plugins that are ignored (skip list) -->
+    <!-- Red tinted overlay for ignored plugins on TV, visible on every theme -->
+    <color name="ignored_plugin_icon">#73D32F2F</color>
+
     <color name="video_ripple">#80FFFFFF</color>
     <color name="video_button_ripple">#32FFFFFF</color>
 

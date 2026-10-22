@@ -32,6 +32,7 @@ import com.lagradost.cloudstream3.ui.player.NEXT_WATCH_EPISODE_PERCENTAGE
 import com.lagradost.cloudstream3.ui.result.EpisodeSortType
 import com.lagradost.cloudstream3.ui.result.ResultEpisode
 import com.lagradost.cloudstream3.ui.result.VideoWatchState
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.utils.AppContextUtils.filterProviderByPreferredMedia
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 import com.lagradost.cloudstream3.utils.serializers.WriteOnlySerializer
@@ -742,6 +743,34 @@ object DataStoreHelper {
      */
     fun setViewPosAndResume(id: Int?, position: Long, duration: Long, currentEpisode: Any?, nextEpisode: Any?) {
         if (!isWatchHistoryEnabled()) return
+
+        // Live streams have no meaningful resume position. Store the entry exactly once so it
+        // still shows up in Continue Watching, then never write anything for it again.
+        // NSFW is only a content category, not a stream kind: NSFW static videos are seekable
+        // and track progress like any other video.
+        val isLive = when (val meta = currentEpisode) {
+            is ResultEpisode -> meta.tvType.isLiveStream()
+            else -> false
+        }
+
+        if (isLive) {
+            val parentId = when (val meta = currentEpisode) {
+                is ResultEpisode -> meta.parentId
+                is ExtractorUri -> meta.parentId
+                else -> null
+            }
+            if (parentId != null && getLastWatched(parentId) == null) {
+                setLastWatched(
+                    parentId,
+                    episodeId = null,
+                    episode = null,
+                    season = null,
+                    isFromDownload = currentEpisode is ExtractorUri,
+                )
+            }
+            return
+        }
+
         setViewPos(id, position, duration)
         if (id != null) {
             when (val meta = currentEpisode) {

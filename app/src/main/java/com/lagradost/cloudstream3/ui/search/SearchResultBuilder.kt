@@ -68,6 +68,14 @@ object SearchResultBuilder {
         val bar: ProgressBar? = itemView.findViewById(R.id.watchProgress)
         val playImg: ImageView? = itemView.findViewById(R.id.search_item_download_play)
         val episodeText: TextView? = itemView.findViewById(R.id.episode_text)
+        val backgroundCard: View? = itemView.findViewById(R.id.background_card)
+
+        // On touch layouts the card container has its own click listener, so it never receives
+        // focus and the focus outline on the root would never show. Keep the card's selection
+        // state in sync so the outline is drawn while the item is focused.
+        if (backgroundCard != null) {
+            backgroundCard.isDuplicateParentStateEnabled = true
+        }
 
         // Do logic
 
@@ -239,6 +247,8 @@ object SearchResultBuilder {
 
         itemView.setOnFocusChangeListener { view, b ->
             focus(view, b)
+            // Make children with duplicateParentState (e.g. the card) draw the focus outline
+            view.isSelected = b
         }
 
         when (card) {

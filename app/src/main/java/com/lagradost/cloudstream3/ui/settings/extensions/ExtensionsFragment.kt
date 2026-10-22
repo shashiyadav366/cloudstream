@@ -196,13 +196,17 @@ class ExtensionsFragment : BaseFragment<FragmentExtensionsBinding>(
                 isHorizontal = false,
                 nextDown = FOCUS_SELF,
                 nextRight = FOCUS_SELF,
+                nextLeft = R.id.nav_rail_view,
             )
             setRecycledViewPool(PluginAdapter.sharedPool)
             adapter =
-                PluginAdapter(true) {
-                    val urls = extensionViewModel.repositories.value?.toList() ?: emptyList()
-                    pluginViewModel.handlePluginAction(activity, urls, it, false)
-                }
+                PluginAdapter(
+                    showRepositoryNames = true,
+                    iconClickCallback = {
+                        val urls = extensionViewModel.repositories.value?.toList() ?: emptyList()
+                        pluginViewModel.handlePluginAction(activity, urls, it, false)
+                    },
+                )
         }
 
         observe(pluginViewModel.filteredPlugins) { (scrollToTop, list) ->

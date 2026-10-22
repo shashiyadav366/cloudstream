@@ -1,7 +1,9 @@
 package com.lagradost.cloudstream3.ui.settings.extensions
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.isVisible
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.databinding.RepositoryItemBinding
 import com.lagradost.cloudstream3.databinding.RepositoryItemTvBinding
@@ -66,6 +68,12 @@ class RepoAdapter(
                     repositoryItemRoot.setOnClickListener {
                         clickCallback(item)
                     }
+
+                    // The repository icon on the left has no action of its own, it only
+                    // swallows the click so it does not open the repository.
+                    entryIcon.setOnClickListener {
+                        // no-op
+                    }
                     mainText.text = item.name
                     subText.text = item.url
                     if (!item.iconUrl.isNullOrEmpty()) {
@@ -80,6 +88,23 @@ class RepoAdapter(
                     } else {
                         entryIcon.loadImage(R.drawable.ic_github_logo)
                     }
+
+                    // TV navigation: the row and its install icon are focusable, the D-pad moves
+                    // between them and every element has its own click event. The repository
+                    // icon on the left is not clickable.
+                    val focusables = listOfNotNull(
+                        actionButton.takeIf { it.isVisible },
+                    )
+                    focusables.forEachIndexed { index, view ->
+                        view.nextFocusLeftId =
+                            if (index == 0) repositoryItemRoot.id else focusables[index - 1].id
+                    }
+                    repositoryItemRoot.nextFocusRightId = focusables.firstOrNull()?.id ?: View.NO_ID
+
+                    applyTvRowFocus(
+                        repositoryItemRoot,
+                        actionButton,
+                    )
                 }
             }
 
@@ -97,6 +122,12 @@ class RepoAdapter(
 
                     repositoryItemRoot.setOnClickListener {
                         clickCallback(item)
+                    }
+
+                    // The repository icon on the left has no action of its own, it only
+                    // swallows the click so it does not open the repository.
+                    entryIcon.setOnClickListener {
+                        // no-op
                     }
 
                     repositoryItemRoot.setOnLongClickListener {

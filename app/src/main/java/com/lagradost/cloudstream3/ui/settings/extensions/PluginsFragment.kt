@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.databinding.FragmentPluginsBinding
 import com.lagradost.cloudstream3.mvvm.observe
+import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.ui.BaseFragment
 import com.lagradost.cloudstream3.ui.home.HomeFragment.Companion.bindChips
 import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
@@ -175,12 +176,27 @@ class PluginsFragment : BaseFragment<FragmentPluginsBinding>(
                 isHorizontal = false,
                 nextDown = FOCUS_SELF,
                 nextRight = FOCUS_SELF,
+                nextLeft = R.id.nav_rail_view,
             )
             setRecycledViewPool(PluginAdapter.sharedPool)
-            adapter =
-                PluginAdapter {
+            lateinit var pluginAdapter: PluginAdapter
+            pluginAdapter = PluginAdapter(
+                showRepositoryNames = false,
+                showIgnoreButton = true,
+                iconClickCallback = {
                     pluginViewModel.handlePluginAction(activity, listOf(repositoryData), it, isLocal)
+                },
+                ignoreClickCallback = {
+                    // Update the row instantly; the persisted state is re-read when the list rebuilds.
+                    val nowIgnored = !PluginManager.isPluginIgnored(
+                        it.plugin.internalName,
+                        it.plugin.url
+                    )
+                    pluginAdapter.setIgnored(it, nowIgnored)
+                    pluginViewModel.handleIgnoreAction(activity, listOf(repositoryData), it, isLocal)
                 }
+            )
+            adapter = pluginAdapter
         }
 
         if (isLayout(TV or EMULATOR)) {
