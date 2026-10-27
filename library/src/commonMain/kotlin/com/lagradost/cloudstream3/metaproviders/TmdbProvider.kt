@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.MovieLoadResponse
 import com.lagradost.cloudstream3.MovieSearchResponse
 import com.lagradost.cloudstream3.ProviderType
 import com.lagradost.cloudstream3.Score
+import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.SearchResponseList
 import com.lagradost.cloudstream3.TvSeriesLoadResponse
 import com.lagradost.cloudstream3.TvSeriesSearchResponse
@@ -254,7 +255,7 @@ open class TmdbProvider : MainAPI() {
         ).text
     }
 
-    private fun TmdbSearchResult.toSearchResponse() = if (isTv) {
+    private fun TmdbSearchResult.toSearchResponse(): SearchResponse = if (isTv) {
         newTvSeriesSearchResponse(
             name = displayTitle,
             url = getUrl(id, true),

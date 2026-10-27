@@ -80,8 +80,7 @@ import com.lagradost.cloudstream3.ui.settings.extensions.PluginsFragment
 import com.lagradost.cloudstream3.ui.settings.extensions.RepositoryData
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStateIds
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getLastWatched
+import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStates
 import com.lagradost.cloudstream3.utils.FillerEpisodeCheck.toClassDir
 import com.lagradost.cloudstream3.utils.JsUnpacker.Companion.load
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
@@ -91,6 +90,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Cache
 import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
@@ -171,9 +171,16 @@ object AppContextUtils {
             .setTitle(title)
             .setPosterArtUri(card.posterUrl?.toUri())
             .setIntentUri((card.id?.let {
-                "$APP_STRING_RESUME_WATCHING://$it"
+                // Include the plugin so Watch Next can open the correct resume entry
+                // when two plugins expose the same provider and the same result id.
+                val pluginQuery = card.sourcePlugin?.let { plugin ->
+                    "?plugin=${URLEncoder.encode(plugin, "UTF-8")}"
+                }.orEmpty()
+                "$APP_STRING_RESUME_WATCHING://$it$pluginQuery"
             } ?: card.url).toUri())
-            .setInternalProviderId(card.url)
+            .setInternalProviderId(
+                "${card.sourcePlugin.orEmpty()}|${card.id}|${card.apiName}|${card.url}"
+            )
             .setLastEngagementTimeUtcMillis(
                 resumeWatching?.updateTime ?: System.currentTimeMillis()
             )
@@ -317,21 +324,28 @@ object AppContextUtils {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val context = this
         continueWatchingLock.withLock {
-            // A way to get all last watched timestamps
-            val timeStampHashMap = HashMap<Int, DownloadObjects.ResumeWatching>()
-            getAllResumeStateIds()?.forEach { id ->
-                val lastWatched = getLastWatched(id) ?: return@forEach
-                timeStampHashMap[lastWatched.parentId] = lastWatched
+            // A way to get all last watched timestamps, kept apart per plugin.
+            val timeStampHashMap = HashMap<String, DownloadObjects.ResumeWatching>()
+            fun resumeKey(id: Int?, sourcePlugin: String?) = "${sourcePlugin.orEmpty()}\u0000$id"
+            getAllResumeStates()?.forEach { lastWatched ->
+                // Index by both ids: the watch-next lookup uses the episode id while
+                // series entries are keyed by their parent id.
+                timeStampHashMap[resumeKey(lastWatched.parentId, lastWatched.sourcePlugin)] =
+                    lastWatched
+                lastWatched.episodeId?.let { episodeId ->
+                    timeStampHashMap[resumeKey(episodeId, lastWatched.sourcePlugin)] = lastWatched
+                }
             }
 
             val currentProgramIds = data.mapNotNull { episodeInfo ->
                 try {
-                    val customId = "${episodeInfo.id}|${episodeInfo.apiName}|${episodeInfo.url}"
+                    val customId =
+                        "${episodeInfo.sourcePlugin.orEmpty()}|${episodeInfo.id}|${episodeInfo.apiName}|${episodeInfo.url}"
                     val (program, id) = getWatchNextProgramByVideoId(customId, context)
                     val nextProgram = buildWatchNextProgramUri(
                         context,
                         episodeInfo,
-                        timeStampHashMap[episodeInfo.id]
+                        timeStampHashMap[resumeKey(episodeInfo.id, episodeInfo.sourcePlugin)]
                     )
 
                     // If the program is already in the Watch Next row, update it
@@ -718,9 +732,12 @@ object AppContextUtils {
         apiName: String,
         name: String,
         startAction: Int = 0,
-        startValue: Int = 0
+        startValue: Int = 0,
+        sourcePlugin: String? = null,
     ) {
-        (activity as FragmentActivity?)?.loadResult(url, apiName, name, startAction, startValue)
+        (activity as FragmentActivity?)?.loadResult(
+            url, apiName, name, startAction, startValue, sourcePlugin
+        )
     }
 
     fun FragmentActivity.loadResult(
@@ -728,7 +745,8 @@ object AppContextUtils {
         apiName: String,
         name: String,
         startAction: Int = 0,
-        startValue: Int = 0
+        startValue: Int = 0,
+        sourcePlugin: String? = null,
     ) {
         try {
             val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
@@ -742,7 +760,9 @@ object AppContextUtils {
             // viewModelStore.clear()
             this.navigate(
                 getResultsId(),
-                ResultFragment.newInstance(url, apiName, name, startAction, startValue)
+                ResultFragment.newInstance(
+                    url, apiName, name, startAction, startValue, sourcePlugin
+                )
             )
         }
     }

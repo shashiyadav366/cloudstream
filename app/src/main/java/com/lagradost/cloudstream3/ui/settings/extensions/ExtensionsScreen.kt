@@ -1263,6 +1263,8 @@ object ExtensionsScreen : Screen {
 
         val isPluginDisabledByAuthor = plugin.info.status == PROVIDER_STATUS_DOWN
         val isDownloadDisabled = isPluginDisabledByAuthor || plugin.source == null
+        // A blocked plugin can never be installed; the user has to un-ignore it first.
+        val isInstallBlocked = plugin.info.ignored && plugin.downloadLocation == null
         Row(
             modifier = modifier
         ) {
@@ -1361,6 +1363,8 @@ object ExtensionsScreen : Screen {
                         PluginStatus.Idle -> {
                             if (plugin.downloadLocation != null) {
                                 onAction(DeletePlugin(plugin.uuid))
+                            } else if (isInstallBlocked) {
+                                /** Blocked plugins cannot be installed, so do nothing here */
                             } else if (isDownloadDisabled) {
                                 /** The author has disabled the plugin, so do nothing here */
                             } else {
@@ -1405,6 +1409,15 @@ object ExtensionsScreen : Screen {
                             Icon(
                                 painter = painterResource(R.drawable.delete_24px),
                                 contentDescription = stringResource(R.string.delete_plugin)
+                            )
+                        } else if (isInstallBlocked) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_baseline_block_24),
+                                contentDescription = stringResource(
+                                    R.string.extension_ignored_install_blocked,
+                                    plugin.info.name
+                                ),
+                                tint = colorResource(R.color.ignored_plugin_icon)
                             )
                         } else if (isDownloadDisabled) {
                             Icon(

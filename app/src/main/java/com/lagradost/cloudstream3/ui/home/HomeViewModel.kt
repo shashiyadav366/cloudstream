@@ -13,11 +13,14 @@ import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.HomePageList
+import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.setSourcePlugin
 import com.lagradost.cloudstream3.amap
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.debugAssert
 import com.lagradost.cloudstream3.mvvm.debugWarning
@@ -43,11 +46,9 @@ import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE_BACKUP
 import com.lagradost.cloudstream3.utils.DataStoreHelper
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStateIds
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllWatchStateIds
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getCurrentAccount
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getLastWatched
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getResultWatchState
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
@@ -61,15 +62,20 @@ class HomeViewModel : ViewModel() {
     companion object {
         suspend fun getResumeWatching(): List<DataStoreHelper.ResumeWatchingResult>? {
             val resumeWatching = withContext(Dispatchers.IO) {
-                getAllResumeStateIds()?.mapNotNull { id ->
-                    getLastWatched(id)
-                }?.sortedBy { -it.updateTime }
+                DataStoreHelper.getAllResumeStates()?.sortedBy { -it.updateTime }
             }
-            val resumeWatchingResult = withContext(Dispatchers.IO) {
-                resumeWatching?.mapNotNull { resume ->
+            val resumeWatchingResult =
+                withContext<List<DataStoreHelper.ResumeWatchingResult>?>(Dispatchers.IO) {
+                val entries = resumeWatching?.mapNotNull { resume ->
+                    // Each plugin keeps its own cached header so two plugins that play the
+                    // same movie resolve to their own card instead of the last one loaded.
+                    val headerKey = DataStoreHelper.headerCacheKey(
+                        resume.parentId,
+                        resume.sourcePlugin
+                    )
                     val headerCache = getKey<DownloadObjects.DownloadHeaderCached>(
                         DOWNLOAD_HEADER_CACHE,
-                        resume.parentId.toString()
+                        headerKey
                     )
 
                     val data = if (headerCache == null) {
@@ -78,17 +84,25 @@ class HomeViewModel : ViewModel() {
                         // removed resume watching data. We should restore the data for affected users.
                         val oldData = getKey<DownloadObjects.DownloadHeaderCached>(
                             DOWNLOAD_HEADER_CACHE_BACKUP,
+                            headerKey
+                        ) ?: getKey<DownloadObjects.DownloadHeaderCached>(
+                            // Entries saved before per-plugin headers existed live under the
+                            // plain id.
+                            DOWNLOAD_HEADER_CACHE_BACKUP,
                             resume.parentId.toString()
                         ) ?: return@mapNotNull null
 
                         // Restore data
-                        setKey(DOWNLOAD_HEADER_CACHE, resume.parentId.toString(), oldData)
+                        setKey(DOWNLOAD_HEADER_CACHE, headerKey, oldData)
                         oldData
                     } else {
                         headerCache
                     }
+                    resume to data
+                } ?: return@withContext null
 
-                    val watchPos = getViewPos(resume.episodeId)
+                entries.map { (resume, data) ->
+                    val watchPos = getViewPos(resume.episodeId, resume.sourcePlugin)
 
                     DataStoreHelper.ResumeWatchingResult(
                         data.name,
@@ -101,15 +115,29 @@ class HomeViewModel : ViewModel() {
                         resume.parentId,
                         resume.episode,
                         resume.season,
-                        resume.isFromDownload
-                    )
+                        resume.isFromDownload,
+                        updateTime = resume.updateTime,
+                    ).apply {
+                        sourcePlugin = resume.sourcePlugin
+                    }
                 }
             }
             // Collapse duplicates: the same movie/show can end up saved under multiple ids
-            // (e.g. provider id changes). Keep only the most recent entry per title.
-            return resumeWatchingResult?.distinctBy {
-                it.url.ifBlank { "${it.apiName}|${it.name}" }
-            }
+            // (e.g. provider id changes). Entries of different plugins are never merged:
+            // each plugin's play stays its own card, so it never redirects to another one.
+            val scopedParentIds = resumeWatchingResult
+                ?.filter { it.sourcePlugin != null }
+                ?.mapNotNull { it.parentId }
+                ?.toSet()
+                .orEmpty()
+            return resumeWatchingResult
+                // Once a title has a per-plugin card, hide the legacy shared card for the
+                // same title so it does not linger as a duplicate.
+                ?.filterNot { it.sourcePlugin == null && it.parentId in scopedParentIds }
+                ?.distinctBy {
+                    "${it.sourcePlugin.orEmpty()}|" +
+                        it.url.ifBlank { "${it.apiName}|${it.name}" }
+                }
         }
     }
 
@@ -155,17 +183,120 @@ class HomeViewModel : ViewModel() {
     val resumeWatching: LiveData<List<SearchResponse>> = _resumeWatching
     val preview: LiveData<Resource<Pair<Boolean, List<LoadResponse>>>> = _preview
 
-    private fun loadResumeWatching() = viewModelScope.launchSafe {
-        val resumeWatchingResult = getResumeWatching()
-        if (isLayout(TV) && resumeWatchingResult != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    /**
+     * The original cards last loaded for each plugin's first home page. Live stream
+     * Continue Watching entries are checked against this instead of asking every plugin
+     * again: if the plugin no longer returns the card, the original card is gone and the
+     * saved entry can be dropped without a single extra request.
+     */
+    private data class LoadedHomeCards(
+        val urls: Set<String>,
+        val ids: Set<Int>,
+        val names: Set<String>,
+        val hasLiveCards: Boolean,
+    )
+
+    private var loadedHomeCards: Map<String, LoadedHomeCards> = emptyMap()
+
+    private fun homeCardsKey(api: MainAPI): String =
+        "${api.sourcePlugin.orEmpty()}|${api.name}"
+
+    /** Card titles are not unique across providers, so compare them case/space-insensitively. */
+    private fun normalizeCardName(name: String): String =
+        name.trim().lowercase().replace(Regex("\\s+"), " ")
+
+    /**
+     * Whether a saved entry is still one of the cards the plugin is currently serving.
+     * Matching only by URL is not enough: live providers embed tokens, timestamps and
+     * live scores in the card URL, so a still-running stream can get a different URL
+     * between two loads. The id and the title stay stable, so they are checked too.
+     */
+    private fun LoadedHomeCards.contains(
+        entry: DataStoreHelper.ResumeWatchingResult
+    ): Boolean {
+        if (entry.url.isNotBlank() && entry.url in urls) return true
+        if (entry.parentId != null && entry.parentId in ids) return true
+        return entry.name.isNotBlank() && normalizeCardName(entry.name) in names
+    }
+
+    /**
+     * A multi-provider extension (Cricify exports SonyLiv and others as their own
+     * providers) shares one extension file with its siblings. Matching by file alone
+     * would check a SonyLiv card against Cricify's home page, which does not list it,
+     * so the provider name has to match as well.
+     */
+    private fun DataStoreHelper.ResumeWatchingResult.belongsTo(api: MainAPI): Boolean {
+        val sameExtension = sourcePlugin == null || sourcePlugin == api.sourcePlugin
+        return sameExtension && apiName == api.name
+    }
+
+    private fun rememberHomeCards(api: MainAPI, data: List<HomePageResponse?>) {
+        val cards = data.flatMap { it?.items.orEmpty() }.flatMap { it.list }
+        loadedHomeCards = loadedHomeCards + (homeCardsKey(api) to LoadedHomeCards(
+            urls = cards.mapNotNull { it.url.takeIf(String::isNotBlank) }.toSet(),
+            ids = cards.mapNotNull { it.id }.toSet(),
+            names = cards.mapNotNull {
+                it.name.takeIf(String::isNotBlank)?.let(::normalizeCardName)
+            }.toSet(),
+            hasLiveCards = cards.any { it.type?.isLiveStream() == true },
+        ))
+    }
+
+    /**
+     * Drops live stream entries that the current plugin is no longer serving. Only the
+     * provider that just loaded its original cards is checked, and only when those cards
+     * actually contain live streams, so a failed or non-live home page never removes
+     * anything. The check is immediate: an entry not served by its own provider anymore
+     * is removed as soon as that provider's home page loads.
+     */
+    private suspend fun applyLiveCardCleanup(
+        entries: List<DataStoreHelper.ResumeWatchingResult>
+    ): List<DataStoreHelper.ResumeWatchingResult> {
+        val api = repo?.api ?: return entries
+        val cards = loadedHomeCards[homeCardsKey(api)] ?: return entries
+        if (!cards.hasLiveCards) return entries
+
+        val goneEntries = entries.filter { entry ->
+            entry.type?.isLiveStream() == true &&
+                entry.belongsTo(api) &&
+                !cards.contains(entry)
+        }
+        if (goneEntries.isEmpty()) return entries
+
+        withContext(Dispatchers.IO) {
+            goneEntries.forEach { entry ->
+                DataStoreHelper.removeResumeWatching(
+                    entry.parentId,
+                    entry.id,
+                    entry.url,
+                    entry.sourcePlugin
+                )
+            }
+        }
+
+        val goneKeys = goneEntries.map {
+            Triple(it.parentId, it.sourcePlugin, it.url)
+        }.toSet()
+        return entries.filterNot {
+            Triple(it.parentId, it.sourcePlugin, it.url) in goneKeys
+        }
+    }
+
+    private fun publishResumeWatching(resumeWatchingResult: List<DataStoreHelper.ResumeWatchingResult>) {
+        if (isLayout(TV) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ioSafe {
                 // this WILL crash on non tvs, so keep this inside a try catch
                 activity?.addProgramsToContinueWatching(resumeWatchingResult)
             }
         }
-        resumeWatchingResult?.let {
-            _resumeWatching.postValue(it)
-        }
+        _resumeWatching.postValue(resumeWatchingResult)
+    }
+
+    private fun loadResumeWatching() = viewModelScope.launchSafe {
+        val resumeWatchingResult = getResumeWatching() ?: return@launchSafe
+        // Nothing is requested here: the entry is compared with the original home cards
+        // that are already loaded, so Continue Watching is never held up.
+        publishResumeWatching(applyLiveCardCleanup(resumeWatchingResult))
     }
 
     fun loadStoredData(preferredWatchStatus: Set<WatchType>?) = viewModelScope.launchSafe {
@@ -345,11 +476,18 @@ class HomeViewModel : ViewModel() {
         when (val data = repo?.getMainPage(1, null)) {
             is Resource.Success -> {
                 try {
+                    repo?.api?.let { rememberHomeCards(it, data.value) }
                     expandable.clear()
                     data.value.forEach { home ->
                         home?.items?.forEach { list ->
                             val filteredList =
                                 context?.filterHomePageListByFilmQuality(list) ?: list
+                            // Remember which plugin produced these items so opening one
+                            // resolves that exact plugin (two plugins may share a name).
+                            val homeSourcePlugin = repo?.api?.sourcePlugin
+                            if (homeSourcePlugin != null) {
+                                filteredList.list.forEach { it.setSourcePlugin(homeSourcePlugin) }
+                            }
                             expandable[list.name] =
                                 ExpandableHomepageList(
                                     filteredList.copy(
@@ -401,6 +539,9 @@ class HomeViewModel : ViewModel() {
                         _preview.postValue(Resource.Success((previewResponsesAdded.size < currentShuffledList.size) to previewResponses))
                     }
                     _page.postValue(Resource.Success(expandable))
+                    // The original cards are now known: prune live entries from this
+                    // plugin that it no longer serves.
+                    loadResumeWatching()
                 } catch (e: Exception) {
                     _randomItems.postValue(emptyList())
                     logError(e)
@@ -441,10 +582,13 @@ class HomeViewModel : ViewModel() {
 
     private fun afterPluginsLoaded(forceReload: Boolean) {
         loadAndCancel(DataStoreHelper.currentHomePage, forceReload)
+        // Live cards can only be validated once the plugins that own them are loaded.
+        loadResumeWatching()
     }
 
     private fun afterMainPluginsLoaded(unused: Boolean = false) {
         loadAndCancel(DataStoreHelper.currentHomePage, false)
+        loadResumeWatching()
     }
 
     private fun reloadHome(unused: Boolean = false) {
@@ -498,7 +642,16 @@ class HomeViewModel : ViewModel() {
     }
 
     fun click(load: LoadClickCallback) {
-        loadResult(load.response.url, load.response.apiName, load.response.name, load.action)
+        // The preview hero carries plain LoadResponses, which have no plugin of their own.
+        // The home provider that produced them does, so pass it along: without it both
+        // extensions playing the same video would share one progress entry.
+        loadResult(
+            load.response.url,
+            load.response.apiName,
+            load.response.name,
+            load.action,
+            sourcePlugin = repo?.api?.sourcePlugin,
+        )
     }
 
     // only save the key if it is from UI, as we don't want internal functions changing the setting

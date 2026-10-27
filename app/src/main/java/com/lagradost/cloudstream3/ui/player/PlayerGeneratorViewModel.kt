@@ -44,6 +44,8 @@ data class GeneratorState(
     val response: LoadResponse?,
     val index: Int,
     val id: Int?,
+    /** Plugin this episode came from, used to scope watch progress per plugin. */
+    val sourcePlugin: String? = null,
 )
 
 data class DisplayLink(
@@ -431,7 +433,8 @@ class PlayerGeneratorViewModel : ViewModel() {
                         id = gen.getId(index),
                         response = (gen as? RepoLinkGenerator)?.page,
                         index = index,
-                        allMeta = gen.videos
+                        allMeta = gen.videos,
+                        sourcePlugin = (gen.videos.getOrNull(index) as? ResultEpisode)?.sourcePlugin,
                     )
                 },
                 instance = instance + 1

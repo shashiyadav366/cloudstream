@@ -31,8 +31,7 @@ import com.lagradost.cloudstream3.utils.DataStore.getFolderName
 import com.lagradost.cloudstream3.utils.DataStore.getKey
 import com.lagradost.cloudstream3.utils.DataStore.getKeys
 import com.lagradost.cloudstream3.utils.DataStore.getSharedPrefs
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStateIds
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getLastWatched
+import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllResumeStates
 import com.lagradost.cloudstream3.utils.ResourceLiveData
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 import com.lagradost.cloudstream3.utils.downloader.DownloadQueueManager
@@ -173,7 +172,7 @@ class DownloadViewModel : ViewModel() {
 
     fun removeRedundantHeaderKeys(
         context: Context,
-        cached: List<DownloadObjects.DownloadHeaderCached>,
+        headerKeys: List<Pair<String, DownloadObjects.DownloadHeaderCached>>,
         totalBytesUsedByChild: Map<Int, Long>,
         totalDownloads: Map<Int, Int>
     ) {
@@ -181,20 +180,19 @@ class DownloadViewModel : ViewModel() {
         ioSafe {
            // Do not remove headers used by resume watching
             val resumeWatchingIds =
-                getAllResumeStateIds()?.mapNotNull { id ->
-                    getLastWatched(id)?.parentId
-                }?.toSet() ?: emptySet()
+                getAllResumeStates()?.mapNotNull { it.parentId }?.toSet() ?: emptySet()
 
             settingsManager.edit {
-                cached.forEach { header ->
+                headerKeys.forEach { (key, header) ->
                     val downloads = totalDownloads[header.id] ?: 0
                     val bytes = totalBytesUsedByChild[header.id] ?: 0
 
                     if ( (downloads <= 0 || bytes <= 0) && !resumeWatchingIds.contains(header.id) ) {
                         Log.i(TAG, "Removing download header key: ${header.id}")
-                        val oldPAth = getFolderName(DOWNLOAD_HEADER_CACHE, header.id.toString())
-                        val newPath =
-                            getFolderName(DOWNLOAD_HEADER_CACHE_BACKUP, header.id.toString())
+                        // Use the stored key: per-plugin headers are saved under
+                        // "<id>|<pluginScope>" and their id alone does not match.
+                        val oldPAth = getFolderName(DOWNLOAD_HEADER_CACHE, key)
+                        val newPath = getFolderName(DOWNLOAD_HEADER_CACHE_BACKUP, key)
                         val oldPref = settingsManager.getString(oldPAth, null)
                         // Cowardly future backup solution in case the key removal fails in some edge case.
                         // This and all backup keys may be removed in a future update if the key removal is proven to be robust.
@@ -221,15 +219,19 @@ class DownloadViewModel : ViewModel() {
             val downloadStats =
                 calculateDownloadStats(context, children)
 
-            val cached = context.getKeys(DOWNLOAD_HEADER_CACHE)
-                .mapNotNull { context.getKey<DownloadObjects.DownloadHeaderCached>(it) }
+            // Keep the stored key around: per-plugin headers live under "<id>|<plugin>".
+            val headerKeys = context.getKeys(DOWNLOAD_HEADER_CACHE)
+                .mapNotNull { key ->
+                    context.getKey<DownloadObjects.DownloadHeaderCached>(key)?.let { key to it }
+                }
+            val cached = headerKeys.map { it.second }
 
             // Download stats and header keys may change when downloading.
             // To prevent the downloader and key removal from colliding, simply do not prune keys when downloading.
             if (!isCurrentlyDownloading) {
                 removeRedundantHeaderKeys(
                     context,
-                    cached,
+                    headerKeys,
                     downloadStats.totalBytesUsedByChild,
                     downloadStats.totalDownloads
                 )

@@ -15,6 +15,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.mvvm.launchSafe
+import com.lagradost.cloudstream3.plugins.PluginData
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.plugins.PluginManager.getPluginPath
 import com.lagradost.cloudstream3.plugins.PluginWrapper
@@ -356,12 +357,26 @@ class PluginsViewModel : ViewModel() {
             getPlugins(repositoryUrl)
         }
 
-        val list = plugins.filter {
+        val candidates = plugins.filter {
             // Show all non-nsfw plugins or all if nsfw is enabled
             it.plugin.tvTypes?.contains(TvType.NSFW.name) != true || isAdult
         }.map { plugin ->
             PluginViewData(plugin, isDownloaded(context, plugin.plugin.internalName, plugin.repositoryData.url))
         }
+
+        // The same plugin can be published by several repositories. Show it once,
+        // preferring an installed copy and then the newest version.
+        val list = candidates
+            .groupBy {
+                PluginManager.getPluginIdentityKey(it.pluginWrapper.plugin.internalName)
+            }
+            .map { (_, copies) ->
+                copies.maxWithOrNull(
+                    compareBy<PluginViewData> { it.isDownloaded }
+                        .thenBy { it.pluginWrapper.plugin.version }
+                        .thenBy { it.pluginWrapper.plugin.fileSize ?: 0L }
+                ) ?: copies.first()
+            }
 
         this.plugins = list
         _filteredPlugins.postValue(
@@ -449,7 +464,17 @@ class PluginsViewModel : ViewModel() {
         Log.i(TAG, "updatePluginList = local")
 
         val downloadedPlugins = (PluginManager.getPluginsOnline() + PluginManager.getPluginsLocal())
-            .distinctBy { it.filePath }
+            .groupBy {
+                PluginManager.getPluginIdentityKey(it.internalName)
+            }
+            .map { (_, copies) ->
+                // Keep one entry per plugin. The other copies stay on disk but are
+                // hidden from every plugin/provider list in the app.
+                copies.maxWithOrNull(
+                    compareBy<PluginData> { it.version }
+                        .thenBy { File(it.filePath).length() }
+                ) ?: copies.first()
+            }
             .map {
                 PluginViewData(PluginWrapper.getLocalPluginWrapper(it.toSitePlugin()), true)
             }

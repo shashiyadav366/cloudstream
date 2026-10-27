@@ -399,7 +399,8 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                 storedData.apiName,
                 storedData.showFillers,
                 storedData.dubStatus,
-                storedData.start
+                storedData.start,
+                sourcePlugin = storedData.sourcePlugin,
             )
         }
     }
@@ -463,12 +464,16 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                 storedData.apiName,
                 storedData.showFillers,
                 storedData.dubStatus,
-                storedData.start
+                storedData.start,
+                sourcePlugin = storedData.sourcePlugin,
             )
 
         setUrl(storedData.url)
         syncModel.addFromUrl(storedData.url)
-        val api = APIHolder.getApiFromNameNull(storedData.apiName)
+        val api = APIHolder.getApiFromSourceAndNameNull(
+            storedData.apiName,
+            storedData.sourcePlugin
+        ) ?: APIHolder.getApiFromNameNull(storedData.apiName)
 
         // This may not be 100% reliable, and may delay for small period
         // before resultCastItems will be scrollable again, but this does work
@@ -498,7 +503,8 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                     storedData.apiName,
                     storedData.showFillers,
                     storedData.dubStatus,
-                    storedData.start
+                    storedData.start,
+                    sourcePlugin = storedData.sourcePlugin,
                 )
             }
 

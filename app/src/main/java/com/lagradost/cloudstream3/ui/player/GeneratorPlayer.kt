@@ -196,6 +196,8 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     private var isPlayerActive: AtomicBoolean = AtomicBoolean(false)
     private var isNextEpisode: Boolean = false // this is used to reset the watch time
+    /** Whether Hindi was already auto-selected for the current playback item. */
+    private var hindiAudioDefaultApplied: Boolean = false
     /** When true, this playback session must not save any watch history or sync progress. */
     private var isIncognito: Boolean = false
 
@@ -203,8 +205,9 @@ class GeneratorPlayer : FullScreenPlayer() {
     private val allMeta: List<ResultEpisode>?
         get() = viewModel.state.generatorState?.allMeta?.filterIsInstance<ResultEpisode>()
             ?.map { episode ->
-                // Refresh all the episodes watch duration
-                getViewPos(episode.id)?.let { data ->
+                // Refresh all the episodes watch duration (per plugin, so two plugins
+                // playing the same movie keep their own progress)
+                getViewPos(episode.id, episode.sourcePlugin)?.let { data ->
                     episode.copy(position = data.position, duration = data.duration)
                 } ?: episode
             }
@@ -238,13 +241,63 @@ class GeneratorPlayer : FullScreenPlayer() {
         val tracks = player.getVideoTracks()
         playerBinding?.playerTracksBtt?.isVisible =
             tracks.allVideoTracks.size > 1 || tracks.allAudioTracks.size > 1
+
+        val audioTracks = tracks.allAudioTracks
+
+        // If this stream has a Hindi track, make it the initial/default audio.
+        // Do this only once per playback item so the user can still switch
+        // tracks afterwards without being forced back to Hindi.
+        if (!hindiAudioDefaultApplied) {
+            val hindiTrack = audioTracks.firstOrNull { isHindiAudioTrack(it) }
+            if (hindiTrack != null) {
+                hindiAudioDefaultApplied = true
+                player.setPreferredAudioTrack(
+                    hindiTrack.language,
+                    hindiTrack.id,
+                    hindiTrack.formatIndex
+                )
+                updatePlayerInfo()
+                return
+            }
+        }
+
         // Only set the preferred language if it is available.
         // Otherwise, it may give some users audio track init failed!
-        if (tracks.allAudioTracks.any { it.language == preferredAudioTrackLanguage }) {
-            player.setPreferredAudioTrack(preferredAudioTrackLanguage)
+        val preferredLanguage = preferredAudioTrackLanguage
+        if (preferredLanguage != null &&
+            audioTracks.any { it.language == preferredLanguage }
+        ) {
+            player.setPreferredAudioTrack(preferredLanguage)
         }
         updatePlayerInfo()
     }
+
+    /**
+     * Matches both language tags (hi, hin, hi-IN) and human-readable labels
+     * (Hindi, Hindi (India), ...), since some streams only provide one of them.
+     */
+    private fun isHindiAudioTrack(track: AudioTrack?): Boolean {
+        if (track == null) return false
+
+        val language = track.language?.trim()?.lowercase()?.replace('_', '-')
+        if (language != null) {
+            val base = language.substringBefore('-')
+            if (base == "hi" || base == "hin" || language.startsWith("hindi")) {
+                return true
+            }
+        }
+
+        if (fromTagToEnglishLanguageName(track.language)
+                ?.equals("Hindi", ignoreCase = true) == true
+        ) {
+            return true
+        }
+
+        return track.label?.contains("hindi", ignoreCase = true) == true
+    }
+
+    private fun List<AudioTrack>.withHindiFirst(): List<AudioTrack> =
+        sortedByDescending { if (isHindiAudioTrack(it)) 1 else 0 }
 
     override fun playerStatusChanged() {
         super.playerStatusChanged()
@@ -263,7 +316,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun getPos(): Long {
         // Incognito playback starts fresh and never resumes from saved history
         if (isIncognito) return 0L
-        val durPos = getViewPos(viewModel.state.generatorState?.id) ?: return 0L
+        val state = viewModel.state.generatorState
+        val durPos = getViewPos(state?.id, state?.sourcePlugin) ?: return 0L
         if (durPos.duration == 0L) return 0L
         if (durPos.position * 100L / durPos.duration > 95L) {
             return 0L
@@ -543,8 +597,10 @@ class GeneratorPlayer : FullScreenPlayer() {
         //  setEpisodes(viewModel.getAllMeta() ?: emptyList())
         setPlayerDimen(null)
         setTitle()
-        if (!sameEpisode)
+        if (!sameEpisode) {
             hasRequestedStamps = false
+            hindiAudioDefaultApplied = false
+        }
 
         loadExtractorJob(link.first)
         // load player
@@ -1445,7 +1501,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                 val currentVideoTracks = tracks.allVideoTracks.sortedBy {
                     it.height?.times(-1)
                 }
-                val currentAudioTracks = tracks.allAudioTracks
+                val currentAudioTracks = tracks.allAudioTracks.withHindiFirst()
                 val binding: PlayerSelectTracksBinding =
                     PlayerSelectTracksBinding.inflate(LayoutInflater.from(ctx), null, false)
                 val trackDialog = Dialog(ctx, R.style.DialogFullscreenPlayer)
@@ -1606,7 +1662,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                 val currentVideoTracks = tracks.allVideoTracks.sortedBy {
                     it.height?.times(-1)
                 }
-                val currentAudioTracks = tracks.allAudioTracks
+                val currentAudioTracks = tracks.allAudioTracks.withHindiFirst()
 
                 val videosList = binding.videoTracksList
                 val audioList = binding.autoTracksList
@@ -2015,7 +2071,8 @@ class GeneratorPlayer : FullScreenPlayer() {
                     position,
                     duration,
                     currentMeta,
-                    nextMeta
+                    nextMeta,
+                    sourcePlugin = viewModel.state.generatorState?.sourcePlugin,
                 )
                 return
             }
@@ -2044,7 +2101,8 @@ class GeneratorPlayer : FullScreenPlayer() {
                 position,
                 duration,
                 currentMeta,
-                nextMeta
+                nextMeta,
+                sourcePlugin = viewModel.state.generatorState?.sourcePlugin,
             )
         }
 

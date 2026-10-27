@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.ui.player
 
 import android.util.Log
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
+import com.lagradost.cloudstream3.APIHolder.getApiFromSourceAndNameNull
 import com.lagradost.cloudstream3.APIHolder.unixTime
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.ui.APIRepository
@@ -50,14 +51,17 @@ class RepoLinkGenerator(
     ): Boolean {
         val current = videos.getOrNull(offset) ?: return false
 
+        // Two plugins can expose the same provider name and result id; include the
+        // plugin so their link caches never leak into each other.
+        val cacheKey = "${current.apiName}|${current.sourcePlugin}" to current.id
         val currentCache = synchronized(cache) {
-            cache[current.apiName to current.id] ?: Cache(
+            cache[cacheKey] ?: Cache(
                 mutableSetOf(),
                 mutableSetOf(),
                 unixTime,
                 false
             ).also {
-                cache[current.apiName to current.id] = it
+                cache[cacheKey] = it
             }
         }
 
@@ -105,7 +109,9 @@ class RepoLinkGenerator(
         }
 
         val result = APIRepository(
-            getApiFromNameNull(current.apiName) ?: throw Exception("This provider does not exist")
+            getApiFromSourceAndNameNull(current.apiName, current.sourcePlugin)
+                ?: getApiFromNameNull(current.apiName)
+                ?: throw Exception("This provider does not exist")
         ).loadLinks(
             current.data,
             isCasting = isCasting,

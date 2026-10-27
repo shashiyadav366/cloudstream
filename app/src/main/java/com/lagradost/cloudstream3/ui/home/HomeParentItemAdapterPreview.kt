@@ -243,7 +243,8 @@ class HomeParentItemAdapterPreview(
                                 DataStoreHelper.removeResumeWatching(
                                     card.parentId,
                                     card.id,
-                                    card.url
+                                    card.url,
+                                    card.sourcePlugin
                                 )
                                 viewModel.reloadStored()
                             }

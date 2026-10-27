@@ -997,6 +997,11 @@ class ExtensionsViewModel2(
 
     private suspend fun downloadPlugin(plugin: Plugin): Boolean {
         val source = plugin.source ?: return false
+        // Blocked plugins are on the skip list: they can never be installed or updated,
+        // whether the request came from a single install or from a batch install.
+        if (manager.isPluginIgnored(plugin.info.internalName, source.pluginUrl)) {
+            return false
+        }
         runCatching {
             manager.downloadPlugin(
                 source = source,

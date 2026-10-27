@@ -136,12 +136,10 @@ object BackupUtils {
         DOWNLOAD_EPISODE_CACHE_BACKUP,
         DOWNLOAD_EPISODE_CACHE,
         
-        // Download header cache is per-title resume metadata that accumulates without bound.
-        // It is deliberately kept out of backup files: nothing about the user's stream
-        // history should travel in a backup, and the file would grow with every title watched.
-        DOWNLOAD_HEADER_CACHE_BACKUP,
-        DOWNLOAD_HEADER_CACHE,
-        
+        // The download header cache is not backed up as a whole: it holds download metadata
+        // and would grow with every title. The entries needed by Continue Watching are added
+        // explicitly in getBackup, so only the cards the user actually watched travel with
+        // a backup.
 
         // This may overwrite valid local data with invalid data
         KEY_DOWNLOAD_INFO,
@@ -182,9 +180,29 @@ object BackupUtils {
         @JsonProperty("settings") @SerialName("settings") val settings: BackupVars,
     )
 
+    /** Keys of the cached card details that Continue Watching needs to show an entry. */
+    private fun String.isHeaderCacheKey(): Boolean =
+        startsWith("$DOWNLOAD_HEADER_CACHE/") || startsWith("$DOWNLOAD_HEADER_CACHE_BACKUP/")
+
     @Suppress("UNCHECKED_CAST")
     private fun getBackup(context: Context): BackupFile {
-        val allData = context.getSharedPrefs().all.filter { it.key.isTransferable() }
+        val dataPrefs = context.getSharedPrefs().all
+
+        // A Continue Watching entry is just a reference to a cached "header" (name, poster,
+        // card URL, type). Back up only the headers that a resume entry points at, instead
+        // of the whole cache, so restoring actually brings Continue Watching back.
+        val resumeSuffixes = dataPrefs.keys
+            .filter { it.contains("/$RESULT_RESUME_WATCHING/") }
+            .mapNotNull { it.substringAfterLast('/').takeIf(String::isNotBlank) }
+            .toSet()
+
+        val allData = dataPrefs.filter { (key, _) ->
+            if (key.isHeaderCacheKey()) {
+                key.substringAfterLast('/') in resumeSuffixes
+            } else {
+                key.isTransferable()
+            }
+        }
         val allSettings = context.getDefaultSharedPrefs().all.filter { it.key.isTransferable() }
 
         val allDataSorted = BackupVars(
@@ -229,6 +247,18 @@ object BackupUtils {
         }
 
         if (restoreDataStore) {
+            // Restore replaces Continue Watching instead of merging it. Otherwise entries
+            // created after the backup (and their cached cards) keep showing up next to
+            // the restored ones, making the backup look wrong.
+            val dataPrefs = context.getSharedPrefs()
+            val watchHistoryKeys = dataPrefs.all.keys.filter { key ->
+                key.contains("/$RESULT_RESUME_WATCHING/") ||
+                    key.contains("/$VIDEO_POS_DUR/")
+            }
+            if (watchHistoryKeys.isNotEmpty()) {
+                dataPrefs.edit { watchHistoryKeys.forEach { remove(it) } }
+            }
+
             context.restoreMap(backupFile.datastore.bool)
             context.restoreMap(backupFile.datastore.int)
             context.restoreMap(backupFile.datastore.string)
@@ -582,7 +612,7 @@ object BackupUtils {
         }
     }
 
-    private fun FragmentActivity.restoreFromText(text: String) {
+    private suspend fun FragmentActivity.restoreFromText(text: String) {
         val restoredValue = parseJson<BackupFile>(text)
 
         restore(
@@ -591,6 +621,11 @@ object BackupUtils {
             restoreSettings = true,
             restoreDataStore = true,
         )
+
+        // The skip list is restored from the backup, but plugin files are not. Uninstall any
+        // plugin the restored skip list now blocks, so nothing is both blocked and installed.
+        PluginManager.uninstallIgnoredPlugins()
+
         // Set before recreate() so the user still gets told the data was recovered
         setKey(RESTORE_CONFIRMATION_KEY, true)
         runOnUiThread { recreate() }

@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKeys
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.setSourcePlugin
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.debugAssert
@@ -138,6 +139,8 @@ class SearchViewModel : ViewModel() {
             val next = repo.search(query, nextPage)
             if (next is Resource.Success) {
                 val nextValue = next.value
+                // Remember the exact plugin so opening a result resolves that plugin.
+                nextValue.items.forEach { it.setSourcePlugin(repo.api.sourcePlugin) }
                 expandableSearches[name]?.apply {
                     this.hasNext = nextValue.hasNext
                     this.currentPage = nextPage
@@ -237,6 +240,9 @@ class SearchViewModel : ViewModel() {
                     if (currentSearchIndex != currentIndex) return@amap
                     if (search is Resource.Success) {
                         val searchValue = search.value
+                        // Remember the exact plugin for every result so progress and
+                        // provider selection stay separated for same-named providers.
+                        searchValue.items.forEach { it.setSourcePlugin(a.api.sourcePlugin) }
                         expandableSearches[a.api.getProviderLabel()] =
                             ExpandableSearchList(searchValue.items, 1, searchValue.hasNext)
                     }

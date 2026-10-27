@@ -22,6 +22,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.SourcePluginAware
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
@@ -535,7 +536,13 @@ object DataStoreHelper {
         @JsonProperty("quality") @SerialName("quality") override var quality: SearchQuality? = null,
         @JsonProperty("posterHeaders") @SerialName("posterHeaders") override var posterHeaders: Map<String, String>? = null,
         @JsonProperty("score") @SerialName("score") override var score: Score? = null,
-    ) : SearchResponse
+        /** Last time the entry was played, used to sort Continue Watching entries. */
+        @Transient val updateTime: Long = 0L,
+    ) : SearchResponse, SourcePluginAware {
+        /** Plugin that produced this entry, when known. Never serialized here. */
+        @Transient
+        override var sourcePlugin: String? = null
+    }
 
     /**
      * A datastore wide account for future implementations of a multiple account system
@@ -569,8 +576,19 @@ object DataStoreHelper {
     fun getAllResumeStateIds(): List<Int>? {
         val folder = "$currentAccount/$RESULT_RESUME_WATCHING"
         return getKeys(folder)?.mapNotNull {
-            it.removePrefix("$folder/").toIntOrNull()
+            // Per-plugin entries are stored as "<parentId>|<pluginScope>".
+            it.removePrefix("$folder/").substringBefore('|').toIntOrNull()
         }
+    }
+
+    /**
+     * All Continue watching entries, including per-plugin ones. Entries carry the
+     * [DownloadObjects.ResumeWatching.sourcePlugin] that created them (null for the
+     * legacy shared entry), so callers can resolve the matching progress scope.
+     */
+    fun getAllResumeStates(): List<DownloadObjects.ResumeWatching>? {
+        val folder = "$currentAccount/$RESULT_RESUME_WATCHING"
+        return getKeys(folder)?.mapNotNull { getKey<DownloadObjects.ResumeWatching>(it) }
     }
 
     private fun getAllResumeStateIdsOld(): List<Int>? {
@@ -599,6 +617,35 @@ object DataStoreHelper {
         // }
     }
 
+    /**
+     * Short, stable scope id for a plugin, used to keep resume positions, Continue
+     * watching entries and cached headers independent per plugin. Null only when the
+     * plugin is unknown (e.g. built-in providers, downloads, external players).
+     *
+     * Uses the plugin path relative to the Extensions folder, so it survives package
+     * renames and flavour changes, then hashes it to keep storage keys short.
+     */
+    fun pluginProgressScope(sourcePlugin: String?): String? {
+        val plugin = sourcePlugin ?: return null
+        return Integer.toHexString(stablePluginId(plugin).hashCode())
+    }
+
+    /** Storage key for a progress/Continue watching entry, scoped when [scope] is set. */
+    fun resumeWatchingKey(id: String, scope: String?): String =
+        if (scope == null) id else "$id|$scope"
+
+    /**
+     * Key of the cached header that belongs to a Continue watching entry of
+     * [sourcePlugin]. Two plugins that play the same movie share one result id, so the
+     * header cache has to be keyed per plugin as well: otherwise the last plugin loaded
+     * would take over the other one's card and playing it would open the wrong video.
+     */
+    fun headerCacheKey(parentId: Int?, sourcePlugin: String?): String =
+        resumeWatchingKey(
+            parentId?.toString() ?: "",
+            pluginProgressScope(sourcePlugin)
+        )
+
     fun setLastWatched(
         parentId: Int?,
         episodeId: Int?,
@@ -606,11 +653,13 @@ object DataStoreHelper {
         season: Int?,
         isFromDownload: Boolean = false,
         updateTime: Long? = null,
+        sourcePlugin: String? = null,
     ) {
         if (parentId == null) return
+        val scope = pluginProgressScope(sourcePlugin)
         setKey(
             "$currentAccount/$RESULT_RESUME_WATCHING",
-            parentId.toString(),
+            resumeWatchingKey(parentId.toString(), scope),
             DownloadObjects.ResumeWatching(
                 parentId,
                 episodeId,
@@ -618,6 +667,9 @@ object DataStoreHelper {
                 season,
                 updateTime ?: System.currentTimeMillis(),
                 isFromDownload,
+                // Persist the plugin only for scoped entries; legacy entries stay null
+                // so they keep resolving to the shared progress.
+                if (scope != null) sourcePlugin else null,
             )
         )
     }
@@ -627,16 +679,21 @@ object DataStoreHelper {
         removeKey("$currentAccount/$RESULT_RESUME_WATCHING_OLD", parentId.toString())
     }
 
-    fun removeLastWatched(parentId: Int?) {
+    fun removeLastWatched(parentId: Int?, sourcePlugin: String? = null) {
         if (parentId == null) return
-        removeKey("$currentAccount/$RESULT_RESUME_WATCHING", parentId.toString())
+        val scope = pluginProgressScope(sourcePlugin)
+        removeKey(
+            "$currentAccount/$RESULT_RESUME_WATCHING",
+            resumeWatchingKey(parentId.toString(), scope),
+        )
     }
 
-    fun getLastWatched(id: Int?): DownloadObjects.ResumeWatching? {
+    fun getLastWatched(id: Int?, sourcePlugin: String? = null): DownloadObjects.ResumeWatching? {
         if (id == null) return null
+        val scope = pluginProgressScope(sourcePlugin)
         return getKey<DownloadObjects.ResumeWatching>(
             "$currentAccount/$RESULT_RESUME_WATCHING",
-            id.toString(),
+            resumeWatchingKey(id.toString(), scope),
         )
     }
 
@@ -730,22 +787,42 @@ object DataStoreHelper {
             .getBoolean(ctx.getString(R.string.watch_history_key), true)
     }
 
-    fun setViewPos(id: Int?, pos: Long, dur: Long) {
+    fun setViewPos(id: Int?, pos: Long, dur: Long, sourcePlugin: String? = null) {
         if (!isWatchHistoryEnabled()) return
         if (id == null) return
         if (dur < 30_000) return // too short
-        setKey("$currentAccount/$VIDEO_POS_DUR", id.toString(), PosDur(pos, dur))
+        val scope = pluginProgressScope(sourcePlugin)
+        if (scope == null) {
+            // Unknown plugin (downloads, external players, legacy paths): shared entry.
+            setKey("$currentAccount/$VIDEO_POS_DUR", id.toString(), PosDur(pos, dur))
+        } else {
+            // A known plugin only writes its own position, so two plugins playing the
+            // same movie never overwrite each other's progress.
+            setKey(
+                "$currentAccount/$VIDEO_POS_DUR",
+                resumeWatchingKey(id.toString(), scope),
+                PosDur(pos, dur),
+            )
+        }
     }
 
     /**
      * Sets the position, duration, and resume data of an episode/movie,
      * If nextEpisode is not specified it will not be able to set the next episode as resumable if progress > NEXT_WATCH_EPISODE_PERCENTAGE
      */
-    fun setViewPosAndResume(id: Int?, position: Long, duration: Long, currentEpisode: Any?, nextEpisode: Any?) {
+    fun setViewPosAndResume(
+        id: Int?,
+        position: Long,
+        duration: Long,
+        currentEpisode: Any?,
+        nextEpisode: Any?,
+        sourcePlugin: String? = null,
+    ) {
         if (!isWatchHistoryEnabled()) return
 
         // Live streams have no meaningful resume position. Store the entry exactly once so it
-        // still shows up in Continue Watching, then never write anything for it again.
+        // shows up in Continue Watching while the original plugin still has the card it was
+        // saved from (HomeViewModel drops the entry once the plugin does not have it anymore).
         // NSFW is only a content category, not a stream kind: NSFW static videos are seekable
         // and track progress like any other video.
         val isLive = when (val meta = currentEpisode) {
@@ -759,19 +836,20 @@ object DataStoreHelper {
                 is ExtractorUri -> meta.parentId
                 else -> null
             }
-            if (parentId != null && getLastWatched(parentId) == null) {
+            if (parentId != null && getLastWatched(parentId, sourcePlugin) == null) {
                 setLastWatched(
                     parentId,
                     episodeId = null,
                     episode = null,
                     season = null,
                     isFromDownload = currentEpisode is ExtractorUri,
+                    sourcePlugin = sourcePlugin,
                 )
             }
             return
         }
 
-        setViewPos(id, position, duration)
+        setViewPos(id, position, duration, sourcePlugin)
         if (id != null) {
             when (val meta = currentEpisode) {
                 is ResultEpisode -> {
@@ -789,11 +867,11 @@ object DataStoreHelper {
             // remove last watched as it is the last episode and you have watched too much
             when (val newMeta = currentEpisode) {
                 is ResultEpisode -> {
-                    removeLastWatched(newMeta.parentId)
+                    removeLastWatched(newMeta.parentId, sourcePlugin)
                 }
 
                 is ExtractorUri -> {
-                    removeLastWatched(newMeta.parentId)
+                    removeLastWatched(newMeta.parentId, sourcePlugin)
                 }
             }
         } else {
@@ -806,6 +884,7 @@ object DataStoreHelper {
                         resumeMeta.episode,
                         resumeMeta.season,
                         isFromDownload = false,
+                        sourcePlugin = sourcePlugin,
                     )
                 }
 
@@ -816,21 +895,50 @@ object DataStoreHelper {
                         resumeMeta.episode,
                         resumeMeta.season,
                         isFromDownload = true,
+                        sourcePlugin = sourcePlugin,
                     )
                 }
             }
         }
     }
 
-    fun getViewPos(id: Int?): PosDur? {
+    fun getViewPos(id: Int?, sourcePlugin: String? = null): PosDur? {
         if (id == null) return null
-        return getKey<PosDur>("$currentAccount/$VIDEO_POS_DUR", id.toString(), null)
+        val folder = "$currentAccount/$VIDEO_POS_DUR"
+        val scope = pluginProgressScope(sourcePlugin)
+        if (scope == null) return getKey<PosDur>(folder, id.toString())
+        // A known plugin only ever reads its own position, so another plugin playing the
+        // same movie cannot show or overwrite this progress.
+        getKey<PosDur>(folder, resumeWatchingKey(id.toString(), scope))?.let { return it }
+        // The shared position holds downloads, external players and history written before
+        // per-plugin progress existed, so it is a legitimate starting point. It is only used
+        // while no plugin has its own position for this title though: once any extension has
+        // played it, the shared value belongs to that other play and must not leak in here.
+        val shared = getKey<PosDur>(folder, id.toString()) ?: return null
+        if (hasPluginProgress(id)) return null
+        return shared
+    }
+
+    /**
+     * Whether any extension already saved its own watch position for [id], meaning the title
+     * has been played per plugin and the shared position no longer describes it.
+     */
+    private fun hasPluginProgress(id: Int): Boolean {
+        val prefix = "$currentAccount/$VIDEO_POS_DUR/$id|"
+        return getKeys("$currentAccount/$VIDEO_POS_DUR")
+            ?.any { it.startsWith(prefix) } == true
     }
 
     /** Removes the saved watch progress for a single episode/movie id. */
-    fun removeViewPos(id: Int?) {
+    fun removeViewPos(id: Int?, sourcePlugin: String? = null) {
         if (id == null) return
         removeKey("$currentAccount/$VIDEO_POS_DUR", id.toString())
+        pluginProgressScope(sourcePlugin)?.let { scope ->
+            removeKey(
+                "$currentAccount/$VIDEO_POS_DUR",
+                resumeWatchingKey(id.toString(), scope),
+            )
+        }
     }
 
     /**
@@ -838,19 +946,27 @@ object DataStoreHelper {
      * Any duplicate entry that points to the same title under a different id is
      * removed as well, so hidden duplicates cannot resurface after removal.
      */
-    fun removeResumeWatching(parentId: Int?, episodeId: Int?, url: String?) {
-        removeLastWatched(parentId)
-        removeViewPos(episodeId)
+    fun removeResumeWatching(
+        parentId: Int?,
+        episodeId: Int?,
+        url: String?,
+        sourcePlugin: String? = null,
+    ) {
+        removeLastWatched(parentId, sourcePlugin)
+        removeViewPos(episodeId, sourcePlugin)
         if (url.isNullOrBlank()) return
-        getAllResumeStateIds()?.forEach { id ->
-            if (id == parentId) return@forEach
+        getAllResumeStates()?.forEach { entry ->
+            if (entry.parentId == parentId) return@forEach
+            // Only drop entries of the same plugin: another plugin playing the same
+            // movie is a separate card and must not be removed with this one.
+            if (entry.sourcePlugin != sourcePlugin) return@forEach
+            val headerKey = headerCacheKey(entry.parentId, entry.sourcePlugin)
             val header = getKey<DownloadObjects.DownloadHeaderCached>(
-                DOWNLOAD_HEADER_CACHE, id.toString()
-            ) ?: getKey(DOWNLOAD_HEADER_CACHE_BACKUP, id.toString()) ?: return@forEach
+                DOWNLOAD_HEADER_CACHE, headerKey
+            ) ?: getKey(DOWNLOAD_HEADER_CACHE_BACKUP, headerKey) ?: return@forEach
             if (header.url == url) {
-                val duplicateEpisodeId = getLastWatched(id)?.episodeId
-                removeLastWatched(id)
-                removeViewPos(duplicateEpisodeId)
+                removeLastWatched(entry.parentId, entry.sourcePlugin)
+                removeViewPos(entry.episodeId, entry.sourcePlugin)
             }
         }
     }

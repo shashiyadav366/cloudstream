@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
@@ -32,6 +33,7 @@ import com.lagradost.cloudstream3.utils.DataStore.removeKeys
 import com.lagradost.cloudstream3.utils.DataStore.setKey
 import com.lagradost.cloudstream3.utils.ImageLoader.buildImageLoader
 import com.lagradost.cloudstream3.utils.LinkBlocker
+import com.lagradost.cloudstream3.utils.PromoPopupFilter
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.FileNotFoundException
@@ -72,6 +74,27 @@ class ExceptionHandler(
 
 class CloudStreamApp : Application(), SingletonImageLoader.Factory {
 
+    private var filteredWindowManager: WindowManager? = null
+
+    private val promoActivityCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+            PromoPopupFilter.installForActivity(activity)
+        }
+
+        override fun onActivityStarted(activity: Activity) {}
+        override fun onActivityResumed(activity: Activity) {
+            PromoPopupFilter.onActivityResumed(activity)
+        }
+
+        override fun onActivityPaused(activity: Activity) {
+            PromoPopupFilter.onActivityPaused()
+        }
+
+        override fun onActivityStopped(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        override fun onActivityDestroyed(activity: Activity) {}
+    }
+
     override fun onCreate() {
         super.onCreate()
         // If we want to initialize Coil as early as possible, maybe when
@@ -87,16 +110,36 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
         }
 
         AppDebug.isDebug = BuildConfig.DEBUG
+        registerActivityLifecycleCallbacks(promoActivityCallbacks)
     }
 
     override fun attachBaseContext(base: Context?) {
         super.attachBaseContext(base)
-        context = base
+        // Keep the Application itself, not the raw base context, so `getContext()` from
+        // extensions returns an instance whose getSystemService/startActivity overrides
+        // are used by the popup filter and the link blocker.
+        context = this
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         // Coil module will be initialized globally when first loadImage() is invoked.
         return buildImageLoader(applicationContext)
+    }
+
+    /**
+     * Extensions get this Application through `com.lagradost.api.getContext()` and use it to
+     * create their dialogs/popup windows. Returning a filtering WindowManager here lets
+     * [PromoPopupFilter] inspect those windows centrally. DialogFragment popups are handled
+     * separately by [promoActivityCallbacks].
+     */
+    override fun getSystemService(name: String): Any? {
+        val service = super.getSystemService(name)
+        if (name == Context.WINDOW_SERVICE && service is WindowManager) {
+            return filteredWindowManager ?: PromoPopupFilter.wrap(service).also {
+                filteredWindowManager = it
+            }
+        }
+        return service
     }
 
     /**
@@ -141,7 +184,7 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
                 // Give plugins the Application instance (not the raw base context) so that
                 // `getContext().startActivity(...)` from any extension is routed through
                 // CloudStreamApp.startActivity and thus intercepted by LinkBlocker.
-                setContext(this)
+                setContext(value)
             }
 
         fun <T : Any> getKeyClass(path: String, valueType: Class<T>): T? {

@@ -179,6 +179,12 @@ object DownloadObjects {
         @JsonProperty("season") @SerialName("season") val season: Int?,
         @JsonProperty("updateTime") @SerialName("updateTime") val updateTime: Long,
         @JsonProperty("isFromDownload") @SerialName("isFromDownload") val isFromDownload: Boolean,
+        /**
+         * Plugin that saved this entry, used to keep watch progress and Continue
+         * watching separate per plugin. Null for entries written before per-plugin
+         * progress existed (shared entry).
+         */
+        @JsonProperty("sourcePlugin") @SerialName("sourcePlugin") val sourcePlugin: String? = null,
     )
 
     data class DownloadStatus(

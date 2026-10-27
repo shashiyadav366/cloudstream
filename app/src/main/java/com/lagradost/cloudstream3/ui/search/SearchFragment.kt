@@ -47,6 +47,7 @@ import com.lagradost.cloudstream3.databinding.HomeSelectMainpageBinding
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.observe
+import com.lagradost.cloudstream3.plugins.RepositoryManager.getRepositoryAuthorForProvider
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.BaseAdapter
 import com.lagradost.cloudstream3.ui.BaseFragment
@@ -353,20 +354,26 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                             }
                         }.sortedBy { it.name.lowercase() }
 
-                        // Filter by the search query when set
+                        // Filter by the search query when set, matching both plugin
+                        // name and repository author.
                         val query = providerQuery.trim()
                         if (query.isNotEmpty()) {
                             currentValidApis = currentValidApis.filter { api ->
-                                api.name.contains(query, ignoreCase = true)
+                                api.name.contains(query, ignoreCase = true) ||
+                                        api.getRepositoryAuthorForProvider()
+                                            ?.contains(query, ignoreCase = true) == true
                             }
                         }
 
+                        // Include the repository author so plugins with the same
+                        // name can be told apart, e.g. "MovieBox - CNC".
                         val names = currentValidApis.map {
-                            if (isMultiLang) "${
-                                SubtitleHelper.getFlagFromIso(
-                                    it.lang
-                                )?.plus(" ") ?: ""
-                            }${it.name}" else it.name
+                            val prefix = if (isMultiLang) {
+                                SubtitleHelper.getFlagFromIso(it.lang)?.plus(" ") ?: ""
+                            } else ""
+                            val author = it.getRepositoryAuthorForProvider()
+                            if (author == null) "$prefix${it.name}"
+                            else "$prefix${it.name} - $author"
                         }
                         for ((index, api) in currentValidApis.map { it.name }.withIndex()) {
                             listView?.setItemChecked(index, currentSelectedApis.contains(api))

@@ -37,7 +37,9 @@ import androidx.core.view.isGone
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.view.marginStart
+import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentFactory
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
@@ -80,6 +82,7 @@ import com.lagradost.cloudstream3.actions.temp.fcast.FcastManager
 import com.lagradost.cloudstream3.databinding.ActivityMainBinding
 import com.lagradost.cloudstream3.databinding.ActivityMainTvBinding
 import com.lagradost.cloudstream3.databinding.BottomResultviewPreviewBinding
+import com.lagradost.cloudstream3.getSourcePlugin
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
@@ -126,6 +129,7 @@ import com.lagradost.cloudstream3.ui.settings.SettingsGeneral
 import com.lagradost.cloudstream3.ui.setup.HAS_DONE_SETUP_KEY
 import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
 import com.lagradost.cloudstream3.utils.ApkInstaller
+import com.lagradost.cloudstream3.utils.AtomicList
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiDubstatusSettings
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.AppContextUtils.isCastApiAvailable
@@ -410,13 +414,19 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                             )
                         )
                     } else if (safeURI(str)?.scheme == APP_STRING_RESUME_WATCHING) {
-                        val id =
-                            str.substringAfter("$APP_STRING_RESUME_WATCHING://").toIntOrNull()
-                                ?: return false
+                        val resumeUri =
+                            str.substringAfter("$APP_STRING_RESUME_WATCHING://")
+                        val id = resumeUri.substringBefore('?').toIntOrNull()
+                            ?: return false
+                        val sourcePlugin = resumeUri.substringAfter("plugin=", "")
+                            .takeIf { it.isNotEmpty() }
+                            ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }
                         ioSafe {
                             val resumeWatchingCard =
-                                HomeViewModel.getResumeWatching()?.firstOrNull { it.id == id }
-                                    ?: return@ioSafe
+                                HomeViewModel.getResumeWatching()?.firstOrNull {
+                                    it.id == id &&
+                                        (sourcePlugin == null || it.sourcePlugin == sourcePlugin)
+                                } ?: return@ioSafe
                             activity.loadSearchResult(
                                 resumeWatchingCard,
                                 START_ACTION_RESUME_LATEST
@@ -504,7 +514,8 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             viewModel.load(
                 this, result.url, result.apiName, false, if (getApiDubstatusSettings()
                         .contains(DubStatus.Dubbed)
-                ) DubStatus.Dubbed else DubStatus.Subbed, null
+                ) DubStatus.Dubbed else DubStatus.Subbed, null,
+                sourcePlugin = result.getSourcePlugin(),
             )
         } else {
             viewModel.loadSmall(result)
@@ -860,6 +871,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
     private fun onAllPluginsLoaded(success: Boolean = false) {
         ioSafe {
             pluginsLock.withLock {
+                // Drop duplicate plugin copies so their providers, extractors,
+                // settings and search entries cannot appear anywhere in the app.
+                PluginManager.unloadDuplicatePlugins()
+
                 allProviders.withLock {
                     // Load cloned sites after plugins have been loaded since clones depend on plugins.
                     try {
@@ -879,11 +894,46 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                                 }
                             }
                         }
-                        // it.hashCode() is not enough to make sure they are distinct
-                        // sourcePlugin keeps same-named providers from different repos apart
-                        apis = allProviders.distinctBy {
-                            it.sourcePlugin + it.lang + it.name + it.mainUrl + it::class.qualifiedName
-                        }
+                        // Some repositories publish the same plugin more than once.
+                        // Collapse those copies into one provider, keeping the newest
+                        // installed plugin version. Different plugins/providers that
+                        // happen to share a display name stay separate.
+                        val pluginDataByPath = (PluginManager.getPluginsOnline() +
+                                PluginManager.getPluginsLocal())
+                            .associateBy { it.filePath }
+
+                        fun pluginVersion(api: MainAPI): Int =
+                            api.sourcePlugin?.let { pluginDataByPath[it]?.version }
+                                ?: Int.MIN_VALUE
+
+                        fun pluginFileSize(api: MainAPI): Long =
+                            api.sourcePlugin
+                                ?.let { pluginDataByPath[it]?.filePath }
+                                ?.let { File(it).length() }
+                                ?: 0L
+
+                        val uniqueProviders = allProviders
+                            .groupBy { api ->
+                                val pluginInternalName = api.sourcePlugin?.let {
+                                    pluginDataByPath[it]?.internalName
+                                }
+                                if (pluginInternalName != null) {
+                                    val providerName = api.name
+                                        .lowercase()
+                                        .filter { it.isLetterOrDigit() }
+                                    "plugin:${PluginManager.getPluginIdentityKey(pluginInternalName)}" +
+                                            "|${api.lang}|$providerName"
+                                } else {
+                                    "builtin:${api::class.qualifiedName}|${api.lang}|${api.name}|${api.mainUrl}"
+                                }
+                            }
+                            .map { (_, providers) ->
+                                providers.maxWithOrNull(
+                                    compareBy<MainAPI> { pluginVersion(it) }
+                                        .thenBy { pluginFileSize(it) }
+                                ) ?: providers.first()
+                            }
+                        apis = AtomicList(uniqueProviders)
                         APIHolder.apiMap = null
                     } catch (e: Exception) {
                         logError(e)
@@ -1249,6 +1299,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         enableEdgeToEdgeCompat()
         setNavigationBarColorCompat(R.attr.primaryGrayBackground)
         updateLocale()
+        // Must be set before the fragment state is restored in super.onCreate: a saved
+        // plugin fragment whose plugin is missing (safe mode, uninstalled extension) would
+        // otherwise crash the activity on every launch.
+        supportFragmentManager.fragmentFactory = SafeFragmentFactory()
         super.onCreate(savedInstanceState)
         try {
             if (isCastApiAvailable()) {
@@ -2130,6 +2184,26 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             ).text.trim() == "ok"
         } catch (t: Throwable) {
             false
+        }
+    }
+}
+
+/**
+ * Fragments owned by plugins (for example a plugin's settings screen) are part of the
+ * activity's saved fragment state. When the plugin is not loaded - safe mode, a failed
+ * extension update, or an uninstalled/renamed plugin - restoring that state throws
+ * ClassNotFoundException and the app cannot start at all.
+ *
+ * Fall back to an empty fragment so the activity always boots; the user can then go back
+ * to the normal UI instead of being locked out by a crash loop.
+ */
+private class SafeFragmentFactory : FragmentFactory() {
+    override fun instantiate(classLoader: ClassLoader, className: String): Fragment {
+        return try {
+            super.instantiate(classLoader, className)
+        } catch (t: Throwable) {
+            logError(t)
+            Fragment()
         }
     }
 }

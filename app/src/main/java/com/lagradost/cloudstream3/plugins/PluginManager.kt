@@ -248,6 +248,29 @@ object PluginManager {
     }
 
     /**
+     * Uninstalls every installed plugin that is on the ignore (skip) list.
+     *
+     * A blocked plugin must never stay installed, but restoring a backup can produce exactly
+     * that: the skip list is part of the backup while plugin files are not, so a plugin that
+     * was unblocked when the backup was made can end up blocked yet still installed. This
+     * removes those copies so a plugin can never be shown as both blocked and installed.
+     */
+    suspend fun uninstallIgnoredPlugins() {
+        val ignoredPlugins = (getPluginsLocal() + getPluginsOnline()).filter {
+            isPluginIgnored(it.internalName, it.url)
+        }
+
+        ignoredPlugins.forEach { data ->
+            val file = File(data.filePath)
+            if (file.exists() && !file.delete()) {
+                Log.w(TAG, "Failed to delete ignored plugin file: ${data.filePath}")
+            }
+            unloadPlugin(file.absolutePath)
+            deletePluginData(data)
+        }
+    }
+
+    /**
      * Marks a plugin as ignored and uninstalls it if present. Being ignored means the plugin is
      * skipped by auto-download, auto-update and batch install/uninstall until it is un-ignored.
      *
@@ -723,6 +746,12 @@ object PluginManager {
      * @return True if successful, false if not
      * */
     internal suspend fun loadPlugin(context: Context, file: File, data: PluginData): Boolean {
+        // Blocked plugins must never become active, even if a file for them still exists.
+        if (isPluginIgnored(data.internalName, data.url)) {
+            Log.i(TAG, "Skipping load of ignored plugin: ${data.internalName}")
+            return false
+        }
+
         val fileName = file.nameWithoutExtension
         val filePath = file.absolutePath
         currentlyLoading = fileName
@@ -874,6 +903,47 @@ object PluginManager {
     }
 
     /**
+     * Stable plugin identity used to collapse the same plugin published by several
+     * repositories. It ignores case, spaces and punctuation, but keeps the full
+     * name. Names like "MovieBox" and "MovieBoxProvider" are different plugins,
+     * and a variant such as "MovieBoxProviderIN" stays separate too.
+     */
+    fun getPluginIdentityKey(internalName: String): String {
+        val normalized = internalName
+            .lowercase()
+            .filter { it.isLetterOrDigit() }
+        return normalized.ifBlank { internalName.lowercase() }
+    }
+
+    /**
+     * Unloads duplicate copies of the same installed plugin, keeping the best copy
+     * (highest version, then largest file). The files are not deleted; this only
+     * prevents duplicate providers, extractors, settings and search entries from
+     * being active at the same time.
+     */
+    fun unloadDuplicatePlugins() {
+        val dataByPath = (getPluginsOnline() + getPluginsLocal())
+            .associateBy { it.filePath }
+        val loadedPaths = synchronized(plugins) { plugins.keys.toList() }
+
+        loadedPaths.groupBy { path ->
+            dataByPath[path]?.internalName?.let { getPluginIdentityKey(it) } ?: path
+        }.forEach { (_, paths) ->
+            if (paths.size < 2) return@forEach
+
+            val bestPath = paths.maxWithOrNull(
+                compareBy<String> { path ->
+                    dataByPath[path]?.version ?: Int.MIN_VALUE
+                }.thenBy { path ->
+                    File(path).length()
+                }
+            ) ?: return@forEach
+
+            paths.filter { it != bestPath }.forEach { unloadPlugin(it) }
+        }
+    }
+
+    /**
      * This should not be changed as it is used to also detect if a plugin is installed!
      **/
     fun getPluginPath(
@@ -912,6 +982,7 @@ object PluginManager {
             Log.i(TAG, "Skipping download of ignored plugin: $internalName")
             return false
         }
+
         try {
             Log.d(TAG, "Downloading plugin: $pluginUrl to ${file.absolutePath}")
             // The plugin file needs to be salted with the repository url hash as to allow multiple repositories with the same internal plugin names

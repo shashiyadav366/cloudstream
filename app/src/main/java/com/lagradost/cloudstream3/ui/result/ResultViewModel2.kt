@@ -40,6 +40,7 @@ import com.lagradost.cloudstream3.ProviderType
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.getSourcePlugin
 import com.lagradost.cloudstream3.SeasonData
 import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.SimklSyncServices
@@ -455,9 +456,12 @@ data class ExtractedTrailerData(
 
 class ResultViewModel2 : ViewModel() {
     private var currentResponse: LoadResponse? = null
+    /** Plugin this result was opened from, when known (two plugins may share a name). */
+    private var currentSourcePlugin: String? = null
     var EPISODE_RANGE_SIZE: Int = 20
     fun clear() {
         currentResponse = null
+        currentSourcePlugin = null
         _page.postValue(null)
     }
 
@@ -1873,7 +1877,7 @@ class ResultViewModel2 : ViewModel() {
 
     private fun getMovie(): ResultEpisode? {
         return currentEpisodes.entries.firstOrNull()?.value?.firstOrNull()?.let { ep ->
-            val posDur = getViewPos(ep.id)
+            val posDur = getViewPos(ep.id, currentSourcePlugin)
             ep.copy(position = posDur?.position ?: 0, duration = posDur?.duration ?: 0)
         }
     }
@@ -1886,7 +1890,7 @@ class ResultViewModel2 : ViewModel() {
             val start = minOf(list.size, range.startIndex)
             val end = minOf(list.size, start + range.length)
             list.subList(start, end).map {
-                val posDur = getViewPos(it.id)
+                val posDur = getViewPos(it.id, currentSourcePlugin)
                 val watchState = getVideoWatchState(it.id) ?: VideoWatchState.None
                 it.copy(
                     position = posDur?.position ?: 0,
@@ -2228,6 +2232,7 @@ class ResultViewModel2 : ViewModel() {
                                     airDate = i.date,
                                     runTime = i.runTime,
                                     seasonData = seasonData,
+                                    sourcePlugin = currentSourcePlugin,
                                 )
 
                             val season = eps.seasonIndex ?: 0
@@ -2285,6 +2290,7 @@ class ResultViewModel2 : ViewModel() {
                                 airDate = episode.date,
                                 runTime = episode.runTime,
                                 seasonData = seasonData,
+                                sourcePlugin = currentSourcePlugin,
                             )
 
                         val season = ep.seasonIndex ?: 0
@@ -2317,6 +2323,7 @@ class ResultViewModel2 : ViewModel() {
                         loadResponse.type,
                         mainId,
                         null,
+                        sourcePlugin = currentSourcePlugin,
                     )
                 )
             }
@@ -2339,7 +2346,8 @@ class ResultViewModel2 : ViewModel() {
                         null,
                         loadResponse.type,
                         mainId,
-                        null
+                        null,
+                        sourcePlugin = currentSourcePlugin,
                     )
                 )
             }
@@ -2362,7 +2370,8 @@ class ResultViewModel2 : ViewModel() {
                         null,
                         loadResponse.type,
                         mainId,
-                        null
+                        null,
+                        sourcePlugin = currentSourcePlugin,
                     )
                 )
             }
@@ -2415,7 +2424,7 @@ class ResultViewModel2 : ViewModel() {
 
     private fun resume(): ResumeWatchingStatus? {
         val correctId = currentId ?: return null
-        val resume = getLastWatched(correctId)
+        val resume = getLastWatched(correctId, currentSourcePlugin)
         val resumeParentId = resume?.parentId
         if (resumeParentId != correctId) return null // is null or smth went wrong with getLastWatched
         val response = currentResponse ?: return null
@@ -2432,7 +2441,7 @@ class ResultViewModel2 : ViewModel() {
 
         val isMovie = response.isMovie()
 
-        val progress = getViewPos(resume.episodeId)?.let { viewPos ->
+        val progress = getViewPos(resume.episodeId, currentSourcePlugin)?.let { viewPos ->
             ResumeProgress(
                 progress = (viewPos.position / 1000).toInt(),
                 maxProgress = (viewPos.duration / 1000).toInt(),
@@ -2590,10 +2599,16 @@ class ResultViewModel2 : ViewModel() {
         val url = searchResponse.url
         _page.postValue(Resource.Loading(url))
         _episodes.postValue(Resource.Loading())
+        val sourcePlugin = searchResponse.getSourcePlugin()
+        currentSourcePlugin = sourcePlugin
         val api =
-            APIHolder.getApiFromNameNull(searchResponse.apiName) ?: APIHolder.getApiFromUrlNull(
-                searchResponse.url
-            ) ?: APIRepository.noneApi
+            APIHolder.getApiFromSourceAndNameNull(searchResponse.apiName, sourcePlugin)
+                ?: APIHolder.getApiFromNameNull(searchResponse.apiName)
+                ?: APIHolder.getApiFromUrlNull(searchResponse.url)
+                ?: APIRepository.noneApi
+        // Same as load(): when the card itself does not know its plugin, scope the play to
+        // the provider that actually served it rather than to the shared bucket.
+        currentSourcePlugin = sourcePlugin ?: api.sourcePlugin
         val repo = APIRepository(api)
         val response = LoadResponseFromSearch(
             name = searchResponse.name,
@@ -2633,6 +2648,7 @@ class ResultViewModel2 : ViewModel() {
         dubStatus: DubStatus,
         autostart: AutoResume?,
         loadTrailers: Boolean = true,
+        sourcePlugin: String? = null,
     ) =
         ioSafe {
             _page.postValue(Resource.Loading(url))
@@ -2640,9 +2656,12 @@ class ResultViewModel2 : ViewModel() {
 
             preferDubStatus = dubStatus
             currentShowFillers = showFillers
+            currentSourcePlugin = sourcePlugin
 
-            // set api
-            val api = APIHolder.getApiFromNameNull(apiName) ?: APIHolder.getApiFromUrlNull(url)
+            // set api: prefer the exact plugin that produced the result, since two
+            // plugins may expose the same provider name.
+            val api = APIHolder.getApiFromSourceAndNameNull(apiName, sourcePlugin)
+                ?: APIHolder.getApiFromNameNull(apiName) ?: APIHolder.getApiFromUrlNull(url)
             if (api == null) {
                 _page.postValue(
                     Resource.Failure(
@@ -2652,6 +2671,12 @@ class ResultViewModel2 : ViewModel() {
                 )
                 return@ioSafe
             }
+
+            // Not every opening path knows the plugin it came from (deep links, downloads,
+            // bookmarks, legacy shortcuts). Fall back to the plugin that owns the resolved
+            // provider so the play is still stored per plugin instead of in the shared
+            // bucket, where another extension playing the same video would pick it up.
+            currentSourcePlugin = sourcePlugin ?: api.sourcePlugin
 
 
             // validate url
@@ -2693,7 +2718,9 @@ class ResultViewModel2 : ViewModel() {
 
                     setKey(
                         DOWNLOAD_HEADER_CACHE,
-                        mainId.toString(),
+                        // Scoped per plugin: two plugins that play this movie get their
+                        // own cached header so neither card redirects to the other.
+                        DataStoreHelper.headerCacheKey(mainId, currentSourcePlugin),
                         DownloadObjects.DownloadHeaderCached(
                             apiName = apiName,
                             url = validUrl,

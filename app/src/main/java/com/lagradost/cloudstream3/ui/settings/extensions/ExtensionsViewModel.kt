@@ -5,11 +5,13 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.mvvm.debugAssert
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.plugins.PluginManager.getPluginsOnline
+import com.lagradost.cloudstream3.plugins.PluginWrapper
 import com.lagradost.cloudstream3.plugins.RepositoryManager
 import com.lagradost.cloudstream3.plugins.RepositoryManager.PREBUILT_REPOSITORIES
 import com.lagradost.cloudstream3.utils.UiText
@@ -67,21 +69,32 @@ class ExtensionsViewModel : ViewModel() {
         val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
             ?: emptyArray()) + PREBUILT_REPOSITORIES
 
-        val onlinePlugins = urls.toList().amap {
+        val allOnlinePlugins = urls.toList().amap {
             RepositoryManager.getRepoPlugins(it)?.toList() ?: emptyList()
-        }.flatten().distinctBy { it.plugin.url }
+        }.flatten()
 
-        // Iterates over all offline plugins, compares to remote repo and returns the plugins which are outdated
-        val outdatedPlugins = getPluginsOnline().flatMap { savedData ->
-            onlinePlugins.filter { onlineData -> savedData.internalName == onlineData.plugin.internalName }
-                .map { onlineData ->
-                    PluginManager.OnlinePluginData(savedData, onlineData)
-                }
-        }.distinctBy { it.onlineData.plugin.url }
+        // Treat the same plugin published by several repositories as one plugin.
+        val onlinePlugins = allOnlinePlugins
+            .groupBy {
+                PluginManager.getPluginIdentityKey(it.plugin.internalName)
+            }
+            .map { (_, copies) ->
+                copies.maxWithOrNull(
+                    compareBy<PluginWrapper> { it.plugin.version }
+                        .thenBy { it.plugin.fileSize ?: 0L }
+                ) ?: copies.first()
+            }
+
+        val installedPluginIdentities = getPluginsOnline()
+            .map { PluginManager.getPluginIdentityKey(it.internalName) }
+            .toSet()
+        val installedPlugins = onlinePlugins.filter {
+            PluginManager.getPluginIdentityKey(it.plugin.internalName) in installedPluginIdentities
+        }
 
         val total = onlinePlugins.count()
-        val disabled = outdatedPlugins.count { it.isDisabled }
-        val downloadedTotal = outdatedPlugins.count()
+        val disabled = installedPlugins.count { it.plugin.status == PROVIDER_STATUS_DOWN }
+        val downloadedTotal = installedPlugins.count()
         val downloaded = downloadedTotal - disabled
         val notDownloaded = total - downloadedTotal
         val stats = PluginStats(

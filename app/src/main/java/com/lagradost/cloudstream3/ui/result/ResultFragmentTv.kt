@@ -186,7 +186,8 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                 storedData.apiName,
                 storedData.showFillers,
                 storedData.dubStatus,
-                storedData.start
+                storedData.start,
+                sourcePlugin = storedData.sourcePlugin,
             )
         }
     }
@@ -268,7 +269,8 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                 storedData.apiName,
                 storedData.showFillers,
                 storedData.dubStatus,
-                storedData.start
+                storedData.start,
+                sourcePlugin = storedData.sourcePlugin,
             )
         // ===== ===== =====
         var comingSoon = false
@@ -396,7 +398,8 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                     storedData.apiName,
                     storedData.showFillers,
                     storedData.dubStatus,
-                    storedData.start
+                    storedData.start,
+                    sourcePlugin = storedData.sourcePlugin,
                 )
 
             }

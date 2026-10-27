@@ -168,6 +168,12 @@ object AndroidRepositoryManager : RepositoryManager {
         source: PluginDownloadSource,
         downloadProgress: (Long, Long?) -> Unit
     ): String = withContext(Dispatchers.IO) {
+        // Blocked plugins are on the skip list: never download or load them, no matter which
+        // UI path asked for it (single install, batch install or update).
+        if (PluginManager.isPluginIgnored(source.internalName, source.pluginUrl)) {
+            throw ErrorLoadingException("Plugin ${source.internalName} is blocked")
+        }
+
         val context = CommonActivity.activity ?: throw ErrorLoadingException("No activity found")
         val file = getPluginPath(
             context = context,

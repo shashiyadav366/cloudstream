@@ -1427,6 +1427,26 @@ interface SearchResponse {
     var score: Score?
 }
 
+/**
+ * Implemented by search response types that can record which plugin produced them.
+ *
+ * Kept separate from [SearchResponse] so existing extension implementations (compiled
+ * against older library versions) remain binary compatible: the app only reads/writes
+ * this through a safe cast. This is what lets two plugins exposing the same provider
+ * name be treated as separate providers (separate progress, correct plugin resolution).
+ */
+interface SourcePluginAware {
+    var sourcePlugin: String?
+}
+
+/** Associates [sourcePlugin] when the response supports it; silently ignores others. */
+fun SearchResponse.setSourcePlugin(sourcePlugin: String?) {
+    (this as? SourcePluginAware)?.sourcePlugin = sourcePlugin
+}
+
+/** The plugin that produced this response, or null when unknown. */
+fun SearchResponse.getSourcePlugin(): String? = (this as? SourcePluginAware)?.sourcePlugin
+
 fun MainAPI.newTorrentSearchResponse(
     name: String,
     url: String,
@@ -1583,7 +1603,9 @@ constructor(
     override var quality: SearchQuality? = null,
     override var posterHeaders: Map<String, String>? = null,
     override var score: Score? = null,
-) : SearchResponse
+) : SearchResponse, SourcePluginAware {
+    override var sourcePlugin: String? = null
+}
 
 fun AnimeSearchResponse.addDubStatus(status: DubStatus, episodes: Int? = null) {
     this.dubStatus = dubStatus?.also { it.add(status) } ?: mutableSetOf(status)
@@ -1643,7 +1665,9 @@ constructor(
     override var quality: SearchQuality? = null,
     override var posterHeaders: Map<String, String>? = null,
     override var score: Score? = null,
-) : SearchResponse {
+) : SearchResponse, SourcePluginAware {
+    override var sourcePlugin: String? = null
+
     @Suppress("DEPRECATION_ERROR")
     @Deprecated(
         "Use newTorrentSearchResponse",
@@ -1678,7 +1702,9 @@ constructor(
     override var quality: SearchQuality? = null,
     override var posterHeaders: Map<String, String>? = null,
     override var score: Score? = null,
-) : SearchResponse {
+) : SearchResponse, SourcePluginAware {
+    override var sourcePlugin: String? = null
+
     @Suppress("DEPRECATION_ERROR")
     @Deprecated(
         "Use newMovieSearchResponse",
@@ -1714,7 +1740,9 @@ constructor(
     override var posterHeaders: Map<String, String>? = null,
     var lang: String? = null,
     override var score: Score? = null,
-) : SearchResponse {
+) : SearchResponse, SourcePluginAware {
+    override var sourcePlugin: String? = null
+
     @Suppress("DEPRECATION_ERROR")
     @Deprecated(
         "Use newLiveSearchResponse",
@@ -1751,7 +1779,9 @@ constructor(
     override var quality: SearchQuality? = null,
     override var posterHeaders: Map<String, String>? = null,
     override var score: Score? = null,
-) : SearchResponse {
+) : SearchResponse, SourcePluginAware {
+    override var sourcePlugin: String? = null
+
     @Suppress("DEPRECATION_ERROR")
     @Deprecated(
         "Use newTvSeriesSearchResponse",

@@ -12,6 +12,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.SeasonData
+import com.lagradost.cloudstream3.getSourcePlugin
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter.Companion.getPlayerAction
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiDubstatusSettings
@@ -62,6 +63,8 @@ data class ResultEpisode(
     @SerialName("airDate") val airDate: Long? = null,
     @SerialName("runTime") val runTime: Int? = null,
     @SerialName("seasonData") val seasonData: SeasonData? = null,
+    /** Plugin that produced this result, when known (see per-plugin progress). */
+    @SerialName("sourcePlugin") val sourcePlugin: String? = null,
 )
 
 fun ResultEpisode.getRealPosition(): Long {
@@ -100,8 +103,9 @@ fun buildResultEpisode(
     airDate: Long? = null,
     runTime: Int? = null,
     seasonData: SeasonData? = null,
+    sourcePlugin: String? = null,
 ): ResultEpisode {
-    val posDur = getViewPos(id)
+    val posDur = getViewPos(id, sourcePlugin)
     val videoWatchState = getVideoWatchState(id) ?: VideoWatchState.None
     return ResultEpisode(
         headerName = headerName,
@@ -125,7 +129,8 @@ fun buildResultEpisode(
         totalEpisodeIndex = totalEpisodeIndex,
         airDate = airDate,
         runTime = runTime,
-        seasonData = seasonData
+        seasonData = seasonData,
+        sourcePlugin = sourcePlugin
     )
 }
 
@@ -142,6 +147,7 @@ object ResultFragment {
     private const val EPISODE_BUNDLE = "episode"
     private const val START_ACTION_BUNDLE = "startAction"
     private const val START_VALUE_BUNDLE = "startValue"
+    private const val SOURCE_PLUGIN_BUNDLE = "sourcePlugin"
     private const val RESTART_BUNDLE = "restart"
 
     fun newInstance(
@@ -151,6 +157,7 @@ object ResultFragment {
             putString(URL_BUNDLE, card.url)
             putString(API_NAME_BUNDLE, card.apiName)
             putString(NAME_BUNDLE, card.name)
+            putString(SOURCE_PLUGIN_BUNDLE, card.getSourcePlugin())
             if (card is DataStoreHelper.ResumeWatchingResult) {
                 if (card.season != null)
                     putInt(SEASON_BUNDLE, card.season)
@@ -171,12 +178,14 @@ object ResultFragment {
         apiName: String,
         name: String,
         startAction: Int = 0,
-        startValue: Int = 0
+        startValue: Int = 0,
+        sourcePlugin: String? = null,
     ): Bundle {
         return Bundle().apply {
             putString(URL_BUNDLE, url)
             putString(API_NAME_BUNDLE, apiName)
             putString(NAME_BUNDLE, name)
+            putString(SOURCE_PLUGIN_BUNDLE, sourcePlugin)
             putInt(START_ACTION_BUNDLE, startAction)
             putInt(START_VALUE_BUNDLE, startValue)
             putBoolean(RESTART_BUNDLE, true)
@@ -238,6 +247,8 @@ object ResultFragment {
         val start: AutoResume?,
         val playerAction: Int,
         val restart: Boolean,
+        /** Plugin the result was opened from, when known (two plugins may share a name). */
+        val sourcePlugin: String?,
     )
 
     fun bindLogo(
@@ -293,6 +304,9 @@ object ResultFragment {
 
         val playerAction = getPlayerAction(context)
 
+        val sourcePlugin = arguments?.getString(SOURCE_PLUGIN_BUNDLE)
+            ?.takeIf { it.isNotBlank() }
+
         val restart = arguments?.getBoolean(RESTART_BUNDLE) ?: false
         if (restart) {
             arguments?.putBoolean(RESTART_BUNDLE, false)
@@ -312,7 +326,17 @@ object ResultFragment {
                 season = resumeSeason
             )
         }
-        return StoredData(url, apiName, name, showFillers, dubStatus, start, playerAction, restart)
+        return StoredData(
+            url,
+            apiName,
+            name,
+            showFillers,
+            dubStatus,
+            start,
+            playerAction,
+            restart,
+            sourcePlugin,
+        )
     }
 
     /*private fun reloadViewModel(forceReload: Boolean) {
