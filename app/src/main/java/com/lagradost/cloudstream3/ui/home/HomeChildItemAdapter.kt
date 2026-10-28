@@ -25,6 +25,7 @@ import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.UIHelper.isBottomLayout
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
+import kotlin.math.roundToInt
 
 class HomeScrollViewHolderState(view: ViewBinding) : ViewHolderState<Boolean>(view) {
     // very shitty that we cant store the state when the view clears,
@@ -54,6 +55,11 @@ class ResumeItemAdapter(
     nextFocusDown = nextFocusDown,
     clickCallback = clickCallback
 ) {
+    init {
+        // Continue Watching keeps the original portrait card, 20% smaller than the poster scale.
+        portraitScale = 0.8f
+    }
+
     // As there is no popup on TV we instead use the footer to clear
     override val footers = if (isLayout(TV or EMULATOR)) 1 else 0
 
@@ -127,25 +133,38 @@ open class HomeChildItemAdapter(
             updateCachedPosterSize()
         }
 
-    private fun updateCachedPosterSize() {
-        setWidth = if (!isHorizontal) {
-            minPosterSize
-        } else {
-            maxPosterSize
+    /** Optional size multiplier for landscape rows. */
+    var landscapeScale: Float = 1f
+        set(value) {
+            field = value
+            updateCachedPosterSize()
         }
-        setHeight = if (!isHorizontal) {
-            maxPosterSize
-        } else {
-            minPosterSize
-        }
-    }
 
-    init {
-        updateCachedPosterSize()
+    /** Optional size multiplier for portrait rows. */
+    var portraitScale: Float = 1f
+        set(value) {
+            field = value
+            updateCachedPosterSize()
+        }
+
+    private fun updateCachedPosterSize() {
+        if (isHorizontal) {
+            // Keep the original landscape dimensions for plugin rows. Only rows
+            // that opt into landscapeScale (Cricket Live) are resized.
+            setWidth = (landscapeWidth * landscapeScale).roundToInt()
+            setHeight = (landscapeHeight * landscapeScale).roundToInt()
+        } else {
+            setWidth = (portraitWidth * portraitScale).roundToInt()
+            setHeight = (portraitHeight * portraitScale).roundToInt()
+        }
     }
 
     protected var setWidth = 0
     protected var setHeight = 0
+
+    init {
+        updateCachedPosterSize()
+    }
 
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Boolean> {
         val expanded = parent.context.isBottomLayout()
@@ -164,16 +183,33 @@ open class HomeChildItemAdapter(
         val sharedPool =
             newSharedPool { setMaxRecycledViews(CONTENT, 20) }
 
-        var minPosterSize: Int = 0
-        var maxPosterSize: Int = 0
+        /** Portrait (2:3) card width in pixels. */
+        var portraitWidth: Int = 0
+            private set
+
+        /** Portrait (2:3) card height in pixels. */
+        var portraitHeight: Int = 0
+            private set
+
+        /** Landscape (16:9) card width in pixels. */
+        var landscapeWidth: Int = 0
+            private set
+
+        /** Landscape (16:9) card height in pixels. */
+        var landscapeHeight: Int = 0
+            private set
 
         fun updatePosterSize(context: Context, value: Int? = null) {
             val scale = value ?: PreferenceManager.getDefaultSharedPreferences(context)
                 ?.getInt(context.getString(R.string.poster_size_key), 0) ?: 0
             // Scale by +10% per step
             val mul = 1.0f + scale * 0.1f
-            minPosterSize = (114.toPx.toFloat() * mul).toInt()
-            maxPosterSize = (180.toPx.toFloat() * mul).toInt()
+            portraitWidth = (114.toPx.toFloat() * mul).toInt()
+            portraitHeight = (180.toPx.toFloat() * mul).toInt()
+
+            // Preserve the original landscape card dimensions for plugin rows.
+            landscapeWidth = portraitHeight
+            landscapeHeight = portraitWidth
         }
 
         fun updateLayoutParms(layout: FrameLayout, width: Int, height: Int) {

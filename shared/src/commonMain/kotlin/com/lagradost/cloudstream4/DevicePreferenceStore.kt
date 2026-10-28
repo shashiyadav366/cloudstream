@@ -215,6 +215,9 @@ class GeneralPreferences(preferences: PreferenceStore) {
     /** Very weird setKey based usage, just having this setting might not do it */
     val jsdelivrProxy = preferences.getBoolean("jsdelivr_proxy_key", false)
 
+    /** Show live cricket cards on the home screen. Off by default. */
+    val liveCricketEvents = preferences.getBoolean("live_cricket_events_key", false)
+
     /** This should honesty be refactored to a single setting */
     val downloadPath = preferences.getString("download_path_key", "")
     val downloadPathVisual = preferences.getString("download_path_key_visual", "")

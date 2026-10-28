@@ -1,10 +1,12 @@
 package com.lagradost.cloudstream3.ui.home
 
+import android.content.SharedPreferences
 import android.os.Build
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.apis
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
@@ -17,6 +19,7 @@ import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainActivity
+import com.lagradost.cloudstream3.MainPageRequest
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.setSourcePlugin
 import com.lagradost.cloudstream3.amap
@@ -55,11 +58,18 @@ import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import java.net.URLDecoder
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.EnumSet
+import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 class HomeViewModel : ViewModel() {
     companion object {
+        private const val CRICKET_LIVE_CACHE_MS = 2 * 60 * 1000L
+        private const val CRICKET_LIVE_PREF_KEY = "live_cricket_events_key"
+
         suspend fun getResumeWatching(): List<DataStoreHelper.ResumeWatchingResult>? {
             val resumeWatching = withContext(Dispatchers.IO) {
                 DataStoreHelper.getAllResumeStates()?.sortedBy { -it.updateTime }
@@ -183,6 +193,119 @@ class HomeViewModel : ViewModel() {
     val resumeWatching: LiveData<List<SearchResponse>> = _resumeWatching
     val preview: LiveData<Resource<Pair<Boolean, List<LoadResponse>>>> = _preview
 
+    private val _cricketLive = MutableLiveData<List<SearchResponse>>(emptyList())
+    val cricketLive: LiveData<List<SearchResponse>> = _cricketLive
+    private var cricketLiveJob: Job? = null
+
+    @Volatile
+    private var cricketLiveCachedAt = 0L
+
+    /** The row is opt-in, so no live-event requests are made while it is off. */
+    private fun isCricketLiveEnabled(): Boolean {
+        val ctx = context ?: return false
+        return PreferenceManager.getDefaultSharedPreferences(ctx)
+            .getBoolean(CRICKET_LIVE_PREF_KEY, false)
+    }
+
+    private fun clearCricketLive() {
+        cricketLiveJob?.cancel()
+        cricketLiveCachedAt = 0L
+        if (_cricketLive.value?.isNotEmpty() == true) {
+            _cricketLive.postValue(emptyList())
+        }
+    }
+
+    private val cricketLivePreferenceListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == CRICKET_LIVE_PREF_KEY) {
+                if (isCricketLiveEnabled()) {
+                    loadCricketLive(force = true)
+                } else {
+                    clearCricketLive()
+                }
+            }
+        }
+
+    /** PlayFy is preferred; Cricify is the fallback. Both are the CNC live-event APIs. */
+    private fun findLiveEventsApis(): List<MainAPI> = apis.withLock {
+        listOfNotNull(
+            apis.firstOrNull { it.name.contains("PlayFy Live Events", ignoreCase = true) },
+            apis.firstOrNull { it.name.contains("Cricify Live Events", ignoreCase = true) },
+        )
+    }
+
+    /**
+     * CNC plugins put the match date inside the generated card URL, for example
+     * &time=Oct+28%2C+2026+11%3A15+AM+IST. That lets us filter without opening each card.
+     */
+    private fun isLiveOrToday(card: SearchResponse, today: String): Boolean {
+        val poster = card.posterUrl ?: return false
+        if (poster.contains("isEnded=true")) return false
+        if (poster.contains("isLive=true")) return true
+        val time = Regex("[?&]time=([^&]+)").find(poster)?.groupValues?.get(1) ?: return false
+        val decoded = runCatching { URLDecoder.decode(time, "UTF-8") }.getOrNull() ?: return false
+        return decoded.startsWith(today)
+    }
+
+    /** Returns the plugin's own cricket cards, keeping live and today's matches. */
+    private suspend fun fetchCricketCards(api: MainAPI): List<SearchResponse>? {
+        val page = withContext(Dispatchers.IO) {
+            runCatching {
+                api.getMainPage(1, MainPageRequest("", "", true))
+            }.getOrNull()
+        } ?: return null
+
+        val today = SimpleDateFormat("MMM dd, yyyy", Locale.US).format(Date())
+        val cards = page.items
+            .filter { it.name.contains("cricket", ignoreCase = true) }
+            .flatMap { it.list }
+            .filter { isLiveOrToday(it, today) }
+            .distinctBy { it.url }
+
+        cards.forEach { it.setSourcePlugin(api.sourcePlugin) }
+        // Remember exactly what the Cricket Live row is serving. If a match is
+        // removed or ends, the next fetch can also drop it from Continue Watching,
+        // even when this live-events plugin is not the selected home provider.
+        rememberCards(api, cards)
+        return cards
+    }
+
+    /**
+     * Fills the Cricket Live header row with the plugin's cricket cards.
+     * PlayFy is used when available, otherwise Cricify. Independent of the selected
+     * home provider.
+     */
+    fun loadCricketLive(force: Boolean = false) {
+        if (!isCricketLiveEnabled()) {
+            clearCricketLive()
+            return
+        }
+
+        if (!force) {
+            if (System.currentTimeMillis() - cricketLiveCachedAt < CRICKET_LIVE_CACHE_MS) return
+            if (cricketLiveJob?.isActive == true) return
+        } else {
+            cricketLiveJob?.cancel()
+        }
+
+        cricketLiveJob = viewModelScope.launchSafe {
+            var cards: List<SearchResponse> = emptyList()
+            val fetchedApis = mutableListOf<Pair<MainAPI, List<SearchResponse>>>()
+            for (api in findLiveEventsApis()) {
+                val fetched = fetchCricketCards(api) ?: continue
+                fetchedApis += api to fetched
+                if (cards.isEmpty() && fetched.isNotEmpty()) {
+                    cards = fetched
+                }
+            }
+
+            if (!isCricketLiveEnabled()) return@launchSafe
+            cricketLiveCachedAt = System.currentTimeMillis()
+            _cricketLive.postValue(cards)
+            cleanupLiveCards(fetchedApis)
+        }
+    }
+
     /**
      * The original cards last loaded for each plugin's first home page. Live stream
      * Continue Watching entries are checked against this instead of asking every plugin
@@ -230,16 +353,23 @@ class HomeViewModel : ViewModel() {
         return sameExtension && apiName == api.name
     }
 
-    private fun rememberHomeCards(api: MainAPI, data: List<HomePageResponse?>) {
-        val cards = data.flatMap { it?.items.orEmpty() }.flatMap { it.list }
-        loadedHomeCards = loadedHomeCards + (homeCardsKey(api) to LoadedHomeCards(
+    private fun toLoadedHomeCards(cards: List<SearchResponse>): LoadedHomeCards {
+        return LoadedHomeCards(
             urls = cards.mapNotNull { it.url.takeIf(String::isNotBlank) }.toSet(),
             ids = cards.mapNotNull { it.id }.toSet(),
             names = cards.mapNotNull {
                 it.name.takeIf(String::isNotBlank)?.let(::normalizeCardName)
             }.toSet(),
             hasLiveCards = cards.any { it.type?.isLiveStream() == true },
-        ))
+        )
+    }
+
+    private fun rememberCards(api: MainAPI, cards: List<SearchResponse>) {
+        loadedHomeCards = loadedHomeCards + (homeCardsKey(api) to toLoadedHomeCards(cards))
+    }
+
+    private fun rememberHomeCards(api: MainAPI, data: List<HomePageResponse?>) {
+        rememberCards(api, data.flatMap { it?.items.orEmpty() }.flatMap { it.list })
     }
 
     /**
@@ -250,15 +380,20 @@ class HomeViewModel : ViewModel() {
      * is removed as soon as that provider's home page loads.
      */
     private suspend fun applyLiveCardCleanup(
-        entries: List<DataStoreHelper.ResumeWatchingResult>
+        entries: List<DataStoreHelper.ResumeWatchingResult>,
+        api: MainAPI? = repo?.api,
+        cardsOverride: List<SearchResponse>? = null,
+        requireLiveCards: Boolean = true,
     ): List<DataStoreHelper.ResumeWatchingResult> {
-        val api = repo?.api ?: return entries
-        val cards = loadedHomeCards[homeCardsKey(api)] ?: return entries
-        if (!cards.hasLiveCards) return entries
+        val currentApi = api ?: return entries
+        val cards = cardsOverride?.let { toLoadedHomeCards(it) }
+            ?: loadedHomeCards[homeCardsKey(currentApi)]
+            ?: return entries
+        if (requireLiveCards && !cards.hasLiveCards) return entries
 
         val goneEntries = entries.filter { entry ->
             entry.type?.isLiveStream() == true &&
-                entry.belongsTo(api) &&
+                entry.belongsTo(currentApi) &&
                 !cards.contains(entry)
         }
         if (goneEntries.isEmpty()) return entries
@@ -279,6 +414,30 @@ class HomeViewModel : ViewModel() {
         }.toSet()
         return entries.filterNot {
             Triple(it.parentId, it.sourcePlugin, it.url) in goneKeys
+        }
+    }
+
+    /**
+     * Prunes Continue Watching after a Cricket Live refresh. This only touches live
+     * entries from PlayFy/Cricify, so other providers and normal live-event cleanup
+     * keep their existing behavior.
+     */
+    private suspend fun cleanupLiveCards(
+        fetchedApis: List<Pair<MainAPI, List<SearchResponse>>>
+    ) {
+        if (fetchedApis.isEmpty()) return
+        val entries = getResumeWatching() ?: return
+        var cleaned = entries
+        for ((api, cards) in fetchedApis) {
+            cleaned = applyLiveCardCleanup(
+                entries = cleaned,
+                api = api,
+                cardsOverride = cards,
+                requireLiveCards = false,
+            )
+        }
+        if (cleaned.size != entries.size) {
+            publishResumeWatching(cleaned)
         }
     }
 
@@ -584,15 +743,18 @@ class HomeViewModel : ViewModel() {
         loadAndCancel(DataStoreHelper.currentHomePage, forceReload)
         // Live cards can only be validated once the plugins that own them are loaded.
         loadResumeWatching()
+        loadCricketLive(force = true)
     }
 
     private fun afterMainPluginsLoaded(unused: Boolean = false) {
         loadAndCancel(DataStoreHelper.currentHomePage, false)
         loadResumeWatching()
+        loadCricketLive()
     }
 
     private fun reloadHome(unused: Boolean = false) {
         loadAndCancel(DataStoreHelper.currentHomePage, true)
+        loadCricketLive(force = true)
     }
 
     private fun reloadAccount(unused: Boolean = false) {
@@ -607,9 +769,18 @@ class HomeViewModel : ViewModel() {
         MainActivity.mainPluginsLoadedEvent += ::afterMainPluginsLoaded
         MainActivity.reloadHomeEvent += ::reloadHome
         MainActivity.reloadAccountEvent += ::reloadAccount
+        context?.let {
+            PreferenceManager.getDefaultSharedPreferences(it)
+                .registerOnSharedPreferenceChangeListener(cricketLivePreferenceListener)
+        }
+        loadCricketLive()
     }
 
     override fun onCleared() {
+        context?.let {
+            PreferenceManager.getDefaultSharedPreferences(it)
+                .unregisterOnSharedPreferenceChangeListener(cricketLivePreferenceListener)
+        }
         MainActivity.bookmarksUpdatedEvent -= ::bookmarksUpdated
         MainActivity.afterPluginsLoadedEvent -= ::afterPluginsLoaded
         MainActivity.mainPluginsLoadedEvent -= ::afterMainPluginsLoaded

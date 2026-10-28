@@ -17,6 +17,17 @@
         android:title="@string/benene"
         app:summary="@string/benene_des" />
 
+    <PreferenceCategory android:title="@string/title_home">
+
+        <SwitchPreference
+            android:defaultValue="false"
+            android:icon="@drawable/ic_baseline_tv_24"
+            android:key="@string/live_cricket_events_key"
+            android:summary="@string/live_cricket_events_summary"
+            android:title="@string/live_cricket_events" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="@string/title_downloads">
 
         <Preference

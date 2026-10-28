@@ -252,6 +252,17 @@ class HomeParentItemAdapterPreview(
                     }
                 }
             })
+        private val cricketAdapter = HomeChildItemAdapter(
+            id = "cricketLiveAdapter".hashCode(),
+            nextFocusUp = itemView.nextFocusUpId,
+            nextFocusDown = itemView.nextFocusDownId,
+            clickCallback = { callback -> viewModel.click(callback) }
+        ).apply {
+            isHorizontal = true
+            // Live cricket cards are 20% smaller than the poster scale.
+            landscapeScale = 0.8f
+        }
+
         private val bookmarkAdapter = HomeChildItemAdapter(
             id = "bookmarkAdapter".hashCode(),
             nextFocusUp = itemView.nextFocusUpId,
@@ -329,6 +340,12 @@ private val homePreviewShimmer: com.facebook.shimmer.ShimmerFrameLayout? =
 
 private val resumeRecyclerView: RecyclerView =
     itemView.findViewById(R.id.home_watch_child_recyclerview)
+
+private val cricketHolder: View =
+    itemView.findViewById(R.id.home_cricket_holder)
+
+private val cricketRecyclerView: RecyclerView =
+    itemView.findViewById(R.id.home_cricket_child_recyclerview)
 
 private val bookmarkHolder: View =
     itemView.findViewById(R.id.home_bookmarked_holder)
@@ -542,8 +559,14 @@ private val homeNonePadding: View =
 
             previewViewpager.adapter = previewAdapter
             resumeRecyclerView.adapter = resumeAdapter
+            cricketRecyclerView.adapter = cricketAdapter
             bookmarkRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
             bookmarkRecyclerView.adapter = bookmarkAdapter
+
+            cricketRecyclerView.setLinearListLayout(
+                nextLeft = R.id.nav_rail_view,
+                nextRight = FOCUS_SELF
+            )
 
             resumeRecyclerView.setLinearListLayout(
                 nextLeft = R.id.nav_rail_view,
@@ -749,6 +772,37 @@ private val homeNonePadding: View =
             }
         }
 
+        private fun updateCricketLive(matches: List<SearchResponse>) {
+            val show = matches.isNotEmpty()
+            cricketHolder.isVisible = show
+            cricketAdapter.submitList(matches)
+
+            val cricketTitle =
+                (binding as? FragmentHomeHeadBinding)?.homeCricketParentItemTitle
+                    ?: (binding as? FragmentHomeHeadTvBinding)?.homeCricketParentItemTitle
+            cricketTitle?.setOnClickListener {
+                if (matches.isEmpty()) return@setOnClickListener
+                viewModel.popup(
+                    HomeViewModel.ExpandableHomepageList(
+                        HomePageList(
+                            cricketTitle.text.toString(),
+                            matches,
+                            true
+                        ), 1, false
+                    )
+                )
+            }
+
+            if (isLayout(TV or EMULATOR)) {
+                // Keep d-pad navigation in visual order on TV: watch -> cricket -> bookmarks.
+                resumeRecyclerView.nextFocusDownId = if (show) {
+                    R.id.home_cricket_child_recyclerview
+                } else {
+                    R.id.home_type_holder
+                }
+            }
+        }
+
         private fun updateResume(resumeWatching: List<SearchResponse>) {
             resumeHolder.isVisible = resumeWatching.isNotEmpty()
             resumeAdapter.submitList(resumeWatching)
@@ -827,6 +881,9 @@ private val homeNonePadding: View =
                 }*/
                 observe(viewModel.resumeWatching) {
                     updateResume(it)
+                }
+                observe(viewModel.cricketLive) {
+                    updateCricketLive(it)
                 }
                 observe(viewModel.bookmarks) {
                     updateBookmarks(it)

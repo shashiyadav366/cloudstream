@@ -575,7 +575,7 @@ class GeneratorPlayer : FullScreenPlayer() {
         }
     }
 
-    private fun loadLink(link: VideoLink?, sameEpisode: Boolean) {
+    private fun loadLink(link: VideoLink?, sameEpisode: Boolean, forcePlay: Boolean = false) {
         if (link == null) return
         isPlayerActive.set(true)
         // manage UI
@@ -621,6 +621,12 @@ class GeneratorPlayer : FullScreenPlayer() {
                 ),
                 preview = true
             )
+        }
+
+        // Switching the source/mirror of the same stream should keep playing even when
+        // "start paused" is enabled or the old player was buffering.
+        if (forcePlay) {
+            player.handleEvent(CSPlayerEvent.Play, PlayerEventSource.Player)
         }
 
         if (!sameEpisode) {
@@ -1480,7 +1486,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                     }
                     if (init) {
                         filteredLinks.getOrNull(sourceIndex)?.let {
-                            loadLink(it.link, true)
+                            loadLink(it.link, true, forcePlay = true)
                         }
                     }
                     sourceDialog.dismissSafe(activity)
@@ -2047,7 +2053,7 @@ class GeneratorPlayer : FullScreenPlayer() {
             return
         }
 
-        loadLink(nextLink.link, true)
+        loadLink(nextLink.link, true, forcePlay = true)
     }
 
     override fun onDestroy() {

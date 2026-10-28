@@ -133,4 +133,5 @@
             tools:progress="50" />
 
     </FrameLayout>
+
 </androidx.cardview.widget.CardView>

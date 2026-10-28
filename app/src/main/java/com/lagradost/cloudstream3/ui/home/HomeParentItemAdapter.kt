@@ -106,12 +106,16 @@ open class ParentItemAdapter(
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId,
                 ).apply {
                     isHorizontal = info.isHorizontalImages
+                    landscapeScale = 1f
+                    portraitScale = 1f
                     hasNext = item.hasNext
                     submitList(item.list.list)
                 }
             } else {
                 currentAdapter.apply {
                     isHorizontal = info.isHorizontalImages
+                    landscapeScale = 1f
+                    portraitScale = 1f
                     hasNext = item.hasNext
                     this.clickCallback = this@ParentItemAdapter.clickCallback
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId
