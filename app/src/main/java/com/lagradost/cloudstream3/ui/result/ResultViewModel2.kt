@@ -1135,6 +1135,9 @@ class ResultViewModel2 : ViewModel() {
         if (activity == null) return
         val response = currentResponse ?: return
         val eps = currentEpisodes[currentIndex ?: return] ?: return
+        // ResultEpisode.index spans all seasons; Cast indexes this season's list.
+        val castEpisodeIndex = eps.indexOfFirst { it.id == result.id }
+        if (castEpisodeIndex < 0) return
 
         // Main needed because getCastSession needs to be on main thread
         main {
@@ -1143,7 +1146,7 @@ class ResultViewModel2 : ViewModel() {
                 response.isMovie(),
                 response.name,
                 response.posterUrl,
-                result.index,
+                castEpisodeIndex,
                 eps,
                 links,
                 subs,
