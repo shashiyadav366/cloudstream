@@ -27,6 +27,21 @@ class CustomHomeSourceApi private constructor(
     private val entries: List<Pair<CustomHomeSources.CategoryRef, MainAPI>>,
 ) : MainAPI() {
     companion object {
+        /** How many of this source's categories can resolve right now from loaded plugins. */
+        fun resolvableCount(source: CustomHomeSources.Source, ctx: Context): Int {
+            return source.categories.count { ref ->
+                CustomHomeSources.resolveApi(ref)?.let { api ->
+                    !CustomHomeSources.isBlockedProvider(api) &&
+                        !HomeCategorySettings.isProviderFullyHidden(ctx, api) &&
+                        !HomeCategorySettings.isHidden(
+                            ctx,
+                            HomeCategorySettings.providerKey(api),
+                            ref.category
+                        )
+                } == true
+            }
+        }
+
         fun create(source: CustomHomeSources.Source, context: Context): CustomHomeSourceApi? {
             val entries = source.categories.mapNotNull { ref ->
                 val api = CustomHomeSources.resolveApi(ref)
