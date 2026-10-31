@@ -5,8 +5,11 @@ import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
 import com.lagradost.cloudstream3.APIHolder.getApiFromSourceAndNameNull
 import com.lagradost.cloudstream3.APIHolder.unixTime
 import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.ui.result.VideoWatchState
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -30,6 +33,58 @@ class RepoLinkGenerator(
         const val TAG = "RepoLink"
         val cache: HashMap<Pair<String, Int>, Cache> =
             hashMapOf()
+
+        /**
+         * Builds a generator for a Continue Watching entry that already carries the plugin's
+         * playable data, so playback can start without loading the provider page first.
+         *
+         * Returns null when the entry cannot be played this way (no data, no parent id, or
+         * an unknown plugin), so callers fall back to the normal result page.
+         */
+        fun fromResume(
+            episodeData: String,
+            apiName: String,
+            sourcePlugin: String?,
+            id: Int?,
+            parentId: Int?,
+            episode: Int?,
+            season: Int?,
+            tvType: TvType,
+            name: String?,
+            poster: String?,
+        ): RepoLinkGenerator? {
+            if (episodeData.isBlank() || parentId == null) return null
+            if (getApiFromSourceAndNameNull(apiName, sourcePlugin) == null &&
+                getApiFromNameNull(apiName) == null
+            ) {
+                return null
+            }
+
+            val entry = ResultEpisode(
+                headerName = name ?: apiName,
+                name = name,
+                poster = poster,
+                episode = episode ?: 0,
+                seasonIndex = null,
+                season = season,
+                data = episodeData,
+                apiName = apiName,
+                // Live entries have no episode id; -1 keeps resume lookups empty.
+                id = id ?: -1,
+                index = 0,
+                position = 0L,
+                duration = 0L,
+                score = null,
+                description = null,
+                isFiller = null,
+                tvType = tvType,
+                parentId = parentId,
+                videoWatchState = VideoWatchState.None,
+                sourcePlugin = sourcePlugin,
+            )
+
+            return RepoLinkGenerator(listOf(entry), page = null)
+        }
     }
 
     override val hasCache = true
@@ -73,7 +128,15 @@ class RepoLinkGenerator(
         val lastCountedSuffix = ConcurrentHashMap<String, AtomicInteger>()
 
         synchronized(currentCache) {
-            val outdatedCache =
+            // Live links are short-lived and can point at a session that has already moved
+            // on. Continue Watching reuses the same episode id, so a cached link from an
+            // earlier play can otherwise be handed to the player even though the provider
+            // would return a fresh working URL. Always resolve live links again, just like
+            // opening the card from its provider; static media keeps the 20-minute cache.
+            // The page type is checked as well: some live-event providers do not tag every
+            // episode with TvType.Live, and their links expire just the same.
+            val isLive = current.tvType.isLiveStream() || page?.type?.isLiveStream() == true
+            val outdatedCache = isLive ||
                 unixTime - currentCache.lastCachedTimestamp > 60 * 20 // 20 minutes
 
             if (outdatedCache || clearCache) {

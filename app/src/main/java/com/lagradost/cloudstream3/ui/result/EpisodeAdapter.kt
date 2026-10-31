@@ -44,6 +44,7 @@ import java.util.Locale
  * @see VideoClickActionHolder
  */
 const val ACTION_PLAY_EPISODE_IN_PLAYER = 1
+const val ACTION_ADD_TO_CONTINUE_WATCHING = 21
 const val ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO = 20
 const val ACTION_CHROME_CAST_EPISODE = 4
 const val ACTION_CHROME_CAST_MIRROR = 5

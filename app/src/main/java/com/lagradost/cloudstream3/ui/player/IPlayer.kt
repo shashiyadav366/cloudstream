@@ -178,6 +178,8 @@ data class VideoTrack(
     val width: Int?,
     val height: Int?,
     override val sampleMimeType: String?,
+    /** Average bitrate in bits/s, or null when the stream does not report it. */
+    val bitrate: Int? = null,
 ) : Track
 
 data class AudioTrack(

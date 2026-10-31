@@ -185,6 +185,14 @@ object DownloadObjects {
          * progress existed (shared entry).
          */
         @JsonProperty("sourcePlugin") @SerialName("sourcePlugin") val sourcePlugin: String? = null,
+
+        /**
+         * The provider's playable data for [episodeId] (the same string that is handed to
+         * `MainAPI.loadLinks`). Persisted so Continue Watching can open the player directly
+         * instead of loading the whole provider page first. Null for entries written by
+         * older versions and for downloads.
+         */
+        @JsonProperty("episodeData") @SerialName("episodeData") val episodeData: String? = null,
     )
 
     data class DownloadStatus(

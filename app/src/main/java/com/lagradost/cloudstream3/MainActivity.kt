@@ -92,6 +92,8 @@ import com.lagradost.cloudstream3.network.initClient
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.plugins.PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins
 import com.lagradost.cloudstream3.plugins.PluginManager.loadSinglePlugin
+import android.content.ClipData
+import android.content.ClipboardManager
 import com.lagradost.cloudstream3.receivers.VideoDownloadRestartReceiver
 import com.lagradost.cloudstream3.services.SubscriptionWorkManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager
@@ -264,6 +266,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
         private const val FILE_DELETE_KEY = "FILES_TO_DELETE_KEY"
         const val API_NAME_EXTRA_KEY = "API_NAME_EXTRA_KEY"
+        const val START_ACTION_EXTRA_KEY = "START_ACTION_EXTRA_KEY"
 
         /**
          * Transient files to delete on application exit.
@@ -453,17 +456,19 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                         } else {
                             val apiName = extraArgs?.getString(API_NAME_EXTRA_KEY)
                                 ?.takeIf { it.isNotBlank() }
+                            val startAction =
+                                extraArgs?.getInt(START_ACTION_EXTRA_KEY, 0) ?: 0
                             // if provided, try to match the api name instead of the api url
                             // this is in order to also support providers that use JSON dataUrls
                             // for example
                             if (apiName != null) {
-                                loadResult(str, apiName, "")
+                                loadResult(str, apiName, "", startAction)
                                 return true
                             }
 
                             val matchedApi = apis.filter { str.startsWith(it.mainUrl) }.firstOrNull()
                             if (matchedApi != null) {
-                                loadResult(str, matchedApi.name, "")
+                                loadResult(str, matchedApi.name, "", startAction)
                                 return true
                             }
                         }
@@ -875,6 +880,17 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                 // settings and search entries cannot appear anywhere in the app.
                 PluginManager.unloadDuplicatePlugins()
 
+                // Read the installed plugin list and stat each file exactly once, before
+                // taking the provider lock. The prefs JSON parse and the old per-comparison
+                // File.length() calls used to run while every provider lookup in the app was
+                // blocked behind this lock.
+                val pluginDataByPath = PluginManager.getPluginsOnline()
+                    .plus(PluginManager.getPluginsLocal())
+                    .associateBy { it.filePath }
+                val fileSizeByPath = pluginDataByPath.keys.associateWith { path ->
+                    runCatching { File(path).length() }.getOrDefault(0L)
+                }
+
                 allProviders.withLock {
                     // Load cloned sites after plugins have been loaded since clones depend on plugins.
                     try {
@@ -898,19 +914,12 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                         // Collapse those copies into one provider, keeping the newest
                         // installed plugin version. Different plugins/providers that
                         // happen to share a display name stay separate.
-                        val pluginDataByPath = (PluginManager.getPluginsOnline() +
-                                PluginManager.getPluginsLocal())
-                            .associateBy { it.filePath }
-
                         fun pluginVersion(api: MainAPI): Int =
                             api.sourcePlugin?.let { pluginDataByPath[it]?.version }
                                 ?: Int.MIN_VALUE
 
                         fun pluginFileSize(api: MainAPI): Long =
-                            api.sourcePlugin
-                                ?.let { pluginDataByPath[it]?.filePath }
-                                ?.let { File(it).length() }
-                                ?: 0L
+                            api.sourcePlugin?.let { fileSizeByPath[it] } ?: 0L
 
                         val uniqueProviders = allProviders
                             .groupBy { api ->
@@ -1460,52 +1469,50 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             showToast(R.string.restore_success, Toast.LENGTH_LONG)
         }
 
+        fun copyCrashInfoToClipboard(context: Context, text: String) {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+            try {
+                cm.setPrimaryClip(ClipData.newPlainText("CloudStream crash info", text))
+                Toast.makeText(context, R.string.saved_crash_info_to_clipboard, Toast.LENGTH_LONG).show()
+            } catch (t: Exception) {
+                logError(t)
+            }
+        }
+
         if (PluginManager.checkSafeModeFile()) {
             safe {
                 showToast(R.string.safe_mode_file, Toast.LENGTH_LONG)
             }
         } else if (lastError == null) {
             ioSafe {
+                // 1. Live-event providers first: PlayFy, then Cricify.
+                PluginManager.loadLiveEventPlugins(this@MainActivity)
+
+                // 2. The selected home provider.
                 DataStoreHelper.currentHomePage?.let { homeApi ->
                     mainPluginsLoadedEvent.invoke(loadSinglePlugin(this@MainActivity, homeApi))
                 } ?: run {
                     mainPluginsLoadedEvent.invoke(false)
                 }
 
-                ioSafe {
-                    if (settingsManager.getBoolean(
-                            getString(R.string.auto_update_plugins_key),
-                            true
-                        )
-                    ) {
-                        PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_updateAllOnlinePluginsAndLoadThem(
-                            this@MainActivity
-                        )
-                    } else {
-                        ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(this@MainActivity)
-                    }
-
-                    //Automatically download not existing plugins, using mode specified.
-                    /*val autoDownloadPlugin = AutoDownloadMode.getEnum(
-                        settingsManager.getInt(
-                            getString(R.string.auto_download_plugins_key),
-                            0
-                        )
-                    ) ?: AutoDownloadMode.Disable
-                    if (autoDownloadPlugin != AutoDownloadMode.Disable) {
-                        PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_downloadNotExistingPluginsAndLoad(
-                            this@MainActivity,
-                            autoDownloadPlugin
-                        )
-                    }*/
-                }
-
-                ioSafe {
-                    PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_loadAllLocalPlugins(
-                        this@MainActivity,
-                        false
+                // 3. The remaining online plugins.
+                if (settingsManager.getBoolean(
+                        getString(R.string.auto_update_plugins_key),
+                        true
                     )
+                ) {
+                    PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_updateAllOnlinePluginsAndLoadThem(
+                        this@MainActivity
+                    )
+                } else {
+                    ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(this@MainActivity)
                 }
+
+                // 4. Local plugins last.
+                PluginManager.___DO_NOT_CALL_FROM_A_PLUGIN_loadAllLocalPlugins(
+                    this@MainActivity,
+                    false
+                )
 
 // Add your channel creation here
 
@@ -1516,17 +1523,13 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             builder.setMessage(R.string.safe_mode_description)
             builder.apply {
                 setPositiveButton(R.string.safe_mode_crash_info) { _, _ ->
-                    val tbBuilder: AlertDialog.Builder = AlertDialog.Builder(context)
-                    tbBuilder.setTitle(R.string.safe_mode_title)
-                    tbBuilder.setMessage(lastError)
-                    tbBuilder.show()
+                    lastError?.let { copyCrashInfoToClipboard(context, it) }
                 }
 
-                setNegativeButton("Ok") { _, _ -> }
+                setNegativeButton(R.string.ok) { _, _ -> }
             }
             builder.show().setDefaultFocus()
         }
-
 
         fun setUserData(status: Resource<SyncAPI.AbstractSyncStatus>?) {
             if (isLocalList) return

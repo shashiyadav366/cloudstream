@@ -12,6 +12,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
+import androidx.preference.PreferenceManager
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -20,6 +21,8 @@ import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.mvvm.safeAsync
 import com.lagradost.cloudstream3.plugins.PluginManager
+import com.lagradost.cloudstream3.services.LiveEventScheduleWorker
+import com.lagradost.cloudstream3.ui.home.LIVE_CRICKET_EVENTS_PREF_KEY
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
@@ -76,6 +79,14 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
 
     private var filteredWindowManager: WindowManager? = null
 
+    private val liveEventPreferenceListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == LIVE_CRICKET_EVENTS_PREF_KEY) {
+                LiveEventScheduleWorker.enqueuePeriodicWork(this)
+                LiveEventScheduleWorker.enqueueImmediateRefresh(this)
+            }
+        }
+
     private val promoActivityCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
             PromoPopupFilter.installForActivity(activity)
@@ -111,6 +122,12 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
 
         AppDebug.isDebug = BuildConfig.DEBUG
         registerActivityLifecycleCallbacks(promoActivityCallbacks)
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .registerOnSharedPreferenceChangeListener(liveEventPreferenceListener)
+        // Home schedules the first refresh after plugins have loaded. Running an
+        // immediate worker here can load the same .cs3 files concurrently and make
+        // their plugin load fail.
+        LiveEventScheduleWorker.enqueuePeriodicWork(this)
     }
 
     override fun attachBaseContext(base: Context?) {

@@ -144,6 +144,7 @@ internal fun PreferenceItem(
                     icon = item.icon,
                     widget = item.widget,
                     onPreferenceClick = item.onClick,
+                    compactTitle = item.compactTitle,
                 )
             }
 

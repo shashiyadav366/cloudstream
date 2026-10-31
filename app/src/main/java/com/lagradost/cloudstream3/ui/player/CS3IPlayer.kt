@@ -286,6 +286,25 @@ class CS3IPlayer : IPlayer {
         return imageGenerator.hasPreview()
     }
 
+    /**
+     * Builds the expensive singletons used by online playback ahead of time.
+     *
+     * The Cronet engine (which loads a native library and may wipe its cache folder) and the
+     * optional media cache (SQLite open + folder scan) are both created lazily on the first
+     * [loadPlayer] call. Doing that synchronously on the main thread while the user waits for
+     * the first frame is pure added latency, so [PlayerView] starts it in the background as
+     * soon as the player screen exists, while links are still being resolved.
+     */
+    fun warmUp(context: Context) {
+        val diskCacheSize = simpleCacheSize
+        ioSafe {
+            tryCreateEngine(context, diskCacheSize)
+            if (simpleCacheSize > 0) {
+                getSimpleCache(context, simpleCacheSize)
+            }
+        }
+    }
+
     override fun loadPlayer(
         context: Context,
         sameEpisode: Boolean,
@@ -474,7 +493,8 @@ class CS3IPlayer : IPlayer {
             this.language,
             this.width,
             this.height,
-            this.sampleMimeType
+            this.sampleMimeType,
+            this.bitrate.takeIf { it != Format.NO_VALUE && it > 0 }
         )
     }
 
@@ -685,6 +705,7 @@ class CS3IPlayer : IPlayer {
          * 2. Mem consumption/GC
          * 3. Disk usage, as we simply use the same folder
          * */
+        @Volatile
         private var cronetEngine: CronetEngine? = null
 
         /**
@@ -750,7 +771,29 @@ class CS3IPlayer : IPlayer {
                 field = value
             }
 
+        @Volatile
         private var simpleCache: SimpleCache? = null
+
+        /** Guards the shared singletons below so only one thread ever builds them. */
+        private val initLock = Any()
+
+        /** True while [tryCreateEngine] is building on another thread. */
+        @Volatile
+        private var cronetBuilding = false
+
+        /** True while the media cache is being created on another thread. */
+        @Volatile
+        private var simpleCacheBuilding = false
+
+        /**
+         * How much media must be buffered before playback starts, and before it resumes
+         * after a rebuffer. Media3 defaults to 2500/5000 ms, which on HLS costs one to
+         * three segments of wall clock before the first frame appears (~2-6 s). Starting
+         * after ~1 s still yields a stable first frame and is the single biggest startup
+         * win for both live and static playback.
+         */
+        private const val BUFFER_FOR_PLAYBACK_MS = 1_000
+        private const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_500
 
         /// Create a small factory for small things, no cache, no cronet
         private fun createOnlineSource(
@@ -778,6 +821,16 @@ class CS3IPlayer : IPlayer {
                 return it
             }
 
+            // [warmUp] is already building the engine on a background thread. Never block
+            // this thread (usually the main one) waiting for it: the caller falls back to
+            // OkHttp for this single play instead of stalling the UI.
+            if (cronetBuilding) return null
+            synchronized(initLock) {
+                cronetEngine?.let { return it }
+                if (cronetBuilding) return null
+                cronetBuilding = true
+            }
+
             // https://gist.github.com/ShivamKumarJha/3c8398b47053ae05112d2a8f8b5de531
             return try {
                 val cacheDirectory = File(context.cacheDir, "CronetEngine")
@@ -803,6 +856,8 @@ class CS3IPlayer : IPlayer {
                 logError(t)
                 // Something went wrong, so we use the backup okhttp
                 null
+            } finally {
+                cronetBuilding = false
             }
         }
 
@@ -860,6 +915,9 @@ class CS3IPlayer : IPlayer {
         }
 
         private fun getCache(context: Context, cacheSize: Long): SimpleCache? {
+            // A zero-sized cache still writes every block to disk and evicts it again
+            // immediately, so simply do not create one.
+            if (cacheSize <= 0L) return null
             return try {
                 val databaseProvider = StandaloneDatabaseProvider(context)
                 SimpleCache(
@@ -872,6 +930,27 @@ class CS3IPlayer : IPlayer {
             } catch (e: Exception) {
                 logError(e)
                 null
+            }
+        }
+
+        /**
+         * Returns the shared media cache, creating it at most once.
+         *
+         * Returns null while another thread (the warm-up) is still building it, so a play
+         * started during warm-up simply runs without a cache instead of blocking the caller.
+         */
+        private fun getSimpleCache(context: Context, cacheSize: Long): SimpleCache? {
+            simpleCache?.let { return it }
+            if (simpleCacheBuilding) return null
+            synchronized(initLock) {
+                simpleCache?.let { return it }
+                if (simpleCacheBuilding) return null
+                simpleCacheBuilding = true
+            }
+            return try {
+                getCache(context, cacheSize)?.also { simpleCache = it }
+            } finally {
+                simpleCacheBuilding = false
             }
         }
 
@@ -1292,8 +1371,8 @@ class CS3IPlayer : IPlayer {
                             } else {
                                 videoBufferMs.toInt()
                             },
-                            DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                            DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+                            BUFFER_FOR_PLAYBACK_MS,
+                            BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
                         ).build()
                 )
 
@@ -1302,25 +1381,35 @@ class CS3IPlayer : IPlayer {
         val extractorFactor = UpdatedDefaultExtractorsFactory()
             .setFragmentedMp4ExtractorFlags(FragmentedMp4Extractor.FLAG_MERGE_FRAGMENTED_SIDX)
 
-        // Create an online connection with cache for all online sources
+        // Create an online connection with cache for all online sources. When the user has
+        // not configured a cache, the previous code still created a 0-byte SimpleCache and
+        // routed every block through it, adding disk traffic to the play path for nothing.
         val dataSourceFactory = if (onlineSource == null) {
             null
         } else {
-            if (simpleCache == null)
-                simpleCache = getCache(context, simpleCacheSize)
-
-            val cacheFactory = CacheDataSource.Factory().apply {
-                simpleCache?.let { setCache(it) }
-                setUpstreamDataSourceFactory(onlineSource)
+            val cache = getSimpleCache(context, simpleCacheSize)
+            if (cache != null) {
+                // Cache enabled: route media through the disk cache, using the configured
+                // onlineSource (Cronet/custom headers) as the upstream.
+                CacheDataSource.Factory().apply {
+                    setCache(cache)
+                    setUpstreamDataSourceFactory(onlineSource)
+                }
+            } else {
+                // No-cache mode: still use the configured network source so Cronet and
+                // provider/custom headers apply to media requests, without storing media
+                // segments on disk.
+                onlineSource
             }
-            cacheFactory
         }
 
-        val defaultMediaSourceFactory = if (dataSourceFactory != null) {
+        // Applied to the factory that is actually used, so live starts [PREFERRED_LIVE_OFFSET]
+        // behind the edge instead of ExoPlayer's (much larger) default target.
+        val defaultMediaSourceFactory = (if (dataSourceFactory != null) {
             DefaultMediaSourceFactory(dataSourceFactory, extractorFactor)
         } else {
             DefaultMediaSourceFactory(context, extractorFactor)
-        }
+        }).setLiveTargetOffsetMs(PREFERRED_LIVE_OFFSET)
 
         // If there is only one item then treat it as normal, if multiple: concatenate the items.
         val videoMediaSource = if (mediaItemSlices.size == 1) {
@@ -1330,7 +1419,7 @@ class CS3IPlayer : IPlayer {
                 when (drm.uuid) {
                     CLEARKEY_DRM_UUID.toJavaUuid() -> {
                         // Use headers from DrmMetadata for media requests
-                        val client = dataSourceFactory
+                        val client = dataSourceFactory ?: onlineSource
                             ?: throw IllegalArgumentException("Must supply onlineSource")
                         val drmCallback =
                             LocalMediaDrmCallback("{\"keys\":[{\"kty\":\"${drm.kty}\",\"k\":\"${drm.key}\",\"kid\":\"${drm.kid}\"}],\"type\":\"temporary\"}".toByteArray())
@@ -1352,7 +1441,7 @@ class CS3IPlayer : IPlayer {
                     WIDEVINE_DRM_UUID.toJavaUuid(),
                     PLAYREADY_DRM_UUID.toJavaUuid() -> {
                         // Use headers from DrmMetadata for media requests
-                        val client = dataSourceFactory
+                        val client = dataSourceFactory ?: onlineSource
                             ?: throw IllegalArgumentException("Must supply onlineSource")
                         val drmCallback = HttpMediaDrmCallback(drm.licenseUrl, client)
                         val manager = DefaultDrmSessionManager.Builder()

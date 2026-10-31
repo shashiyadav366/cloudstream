@@ -3,7 +3,11 @@ package com.lagradost.cloudstream3.ui.search
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
+import android.os.Handler
+import android.os.Looper
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -19,6 +23,7 @@ import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.isMovieType
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
+import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
@@ -241,6 +246,13 @@ object SearchResultBuilder {
             return@setOnLongClickListener true
         }
 
+        // A held D-pad center/OK press is not delivered as a long click to a focused
+        // RecyclerView item, so emulate one for Continue Watching cards. Long press
+        // opens the card options, short press keeps opening the player as before.
+        if (isLayout(TV or EMULATOR) && card is DataStoreHelper.ResumeWatchingResult) {
+            itemView.setOnKeyListener(emulatedLongPress { longClick(itemView) })
+        }
+
         /*bg.setOnFocusChangeListener { view, b ->
             focus(view, b)
         }*/
@@ -335,6 +347,52 @@ object SearchResultBuilder {
         }
         textIsDub?.apply {
             backgroundTintList = ColorStateList.valueOf(context.colorFromAttribute(R.attr.textColor))
+        }
+    }
+}
+
+/**
+ * Turns a held D-pad center/OK press into a long click. The framework only runs
+ * long-click detection for touch, so key input needs this to report the press.
+ */
+private fun emulatedLongPress(onLongPress: (View) -> Unit): View.OnKeyListener {
+    val handler = Handler(Looper.getMainLooper())
+    val timeout = ViewConfiguration.getLongPressTimeout().toLong()
+    var pending: Runnable? = null
+    var triggered = false
+
+    return View.OnKeyListener { view, keyCode, event ->
+        if (keyCode != KeyEvent.KEYCODE_DPAD_CENTER && keyCode != KeyEvent.KEYCODE_ENTER) {
+            return@OnKeyListener false
+        }
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    triggered = false
+                    pending?.let { handler.removeCallbacks(it) }
+                    val press = Runnable {
+                        triggered = true
+                        onLongPress(view)
+                    }
+                    pending = press
+                    handler.postDelayed(press, timeout)
+                }
+                false
+            }
+
+            KeyEvent.ACTION_UP -> {
+                pending?.let { handler.removeCallbacks(it) }
+                pending = null
+                if (triggered) {
+                    // Swallow the key up so the long press does not also click.
+                    triggered = false
+                    true
+                } else {
+                    false
+                }
+            }
+
+            else -> false
         }
     }
 }

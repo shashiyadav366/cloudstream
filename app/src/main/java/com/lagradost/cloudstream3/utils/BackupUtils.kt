@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.plugins.IGNORED_PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY_LOCAL
 import com.lagradost.cloudstream3.plugins.PluginManager
@@ -25,6 +26,9 @@ import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.providers.AniListApi.Companion.ANILIST_CACHED_LIST
 import com.lagradost.cloudstream3.syncproviders.providers.MALApi.Companion.MAL_CACHED_LIST
 import com.lagradost.cloudstream3.syncproviders.providers.KitsuApi.Companion.KITSU_CACHED_LIST
+import com.lagradost.cloudstream3.ui.home.HomeCategorySettings
+import com.lagradost.cloudstream3.ui.home.ChildProviderSettings
+import com.lagradost.cloudstream3.ui.home.CustomHomeSources
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
@@ -161,6 +165,12 @@ object BackupUtils {
         return !nonTransferableKeys.any { this.contains(it) }
     }
 
+    /**
+     * Keys that are already transferable but are explicitly whitelisted because
+     * losing them would change the home screen after a restore.
+     */
+    private val mustBackupKeys = setOf(IGNORED_PLUGINS_KEY)
+
     private var restoreFileSelector: ActivityResultLauncher<Array<String>>? = null
 
     // Kinda hack, but I couldn't think of a better way
@@ -178,6 +188,10 @@ object BackupUtils {
     data class BackupFile(
         @JsonProperty("datastore") @SerialName("datastore") val datastore: BackupVars,
         @JsonProperty("settings") @SerialName("settings") val settings: BackupVars,
+        // Child-provider checklists live in each plugin's own preference file,
+        // not in the datastore/settings above. Keyed by preference file name.
+        @JsonProperty("plugin_prefs") @SerialName("plugin_prefs")
+        val pluginPrefs: Map<String, Map<String, Boolean>>? = null,
     )
 
     /** Keys of the cached card details that Continue Watching needs to show an entry. */
@@ -200,10 +214,15 @@ object BackupUtils {
             if (key.isHeaderCacheKey()) {
                 key.substringAfterLast('/') in resumeSuffixes
             } else {
-                key.isTransferable()
+                key.isTransferable() || key in mustBackupKeys
             }
         }
-        val allSettings = context.getDefaultSharedPrefs().all.filter { it.key.isTransferable() }
+        val allSettings = context.getDefaultSharedPrefs().all.filter {
+            // Category rules travel with the regular settings section and are
+            // explicitly whitelisted so they cannot be dropped by future filters.
+            it.key.isTransferable() || it.key in HomeCategorySettings.backupKeys ||
+                it.key in CustomHomeSources.backupKeys
+        }
 
         val allDataSorted = BackupVars(
             allData.filter { it.value is Boolean } as? Map<String, Boolean>,
@@ -226,6 +245,7 @@ object BackupUtils {
         return BackupFile(
             allDataSorted,
             allSettingsSorted,
+            ChildProviderSettings.backup(context),
         )
     }
 
@@ -244,6 +264,12 @@ object BackupUtils {
             context.restoreMap(backupFile.settings.float, true)
             context.restoreMap(backupFile.settings.long, true)
             context.restoreMap(backupFile.settings.stringSet, true)
+
+            // Child-provider selections are stored separately by plugins such as
+            // Cricify/PlayFy, so restore them explicitly.
+            backupFile.pluginPrefs?.let {
+                ChildProviderSettings.restore(context, it)
+            }
         }
 
         if (restoreDataStore) {
@@ -271,6 +297,14 @@ object BackupUtils {
         for(api in AccountManager.syncApis) {
             api.requireLibraryRefresh = true
         }
+
+        // Category rules are stored in the regular settings section, so they are
+        // already part of the backup. Normalise restored provider keys to the
+        // portable plugin-file key so they match on this device too.
+        HomeCategorySettings.migrateProviderKeys(context)
+        // The selected default homepage provider is stored in the datastore. Its
+        // plugin path comes from the other device, so resolve it to the local path.
+        DataStoreHelper.normalizeCurrentHomeSource()
     }
 
     /**

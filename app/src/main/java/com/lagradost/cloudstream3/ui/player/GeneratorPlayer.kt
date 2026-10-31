@@ -11,7 +11,12 @@ import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.Spannable
+import android.text.SpannableString
 import android.text.Spanned
+import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -150,6 +155,13 @@ class GeneratorPlayer : FullScreenPlayer() {
         const val CHANNEL_ID = 7340
         const val STOP_ACTION = "stopcs3"
 
+        /**
+         * Grace period for a preferred (high priority) link before playback starts with the
+         * best link that is already available. Providers normally emit their best link first,
+         * so this keeps quality without waiting for every mirror to be resolved.
+         */
+        private const val EARLY_START_DELAY_MS = 700L
+
         private val generators = ConcurrentHashMap<String, VideoGenerator<*>>()
         fun newInstance(
             generator: VideoGenerator<*>,
@@ -195,6 +207,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     private val nextMeta: Any? get() = viewModel.state.generatorState?.nextMeta
 
     private var isPlayerActive: AtomicBoolean = AtomicBoolean(false)
+    private val startFallbackHandler = Handler(Looper.getMainLooper())
+    private var startFallbackScheduled = false
     private var isNextEpisode: Boolean = false // this is used to reset the watch time
     /** Whether Hindi was already auto-selected for the current playback item. */
     private var hindiAudioDefaultApplied: Boolean = false
@@ -1498,15 +1512,47 @@ class GeneratorPlayer : FullScreenPlayer() {
         }
     }
 
+    /**
+     * Quality label for one video stream. The bitrate is appended in a smaller font so
+     * equal-resolution variants can be told apart (the list only showed "1280x720" before).
+     */
+    private fun videoTrackLabel(index: Int, track: VideoTrack): CharSequence {
+        val name = track.label
+            ?: if (track.height == NO_VALUE || track.width == NO_VALUE) index.toString()
+            else "${track.width}x${track.height}"
+        val bitrate = track.bitrate
+        if (bitrate == null || bitrate <= 0) return name
+
+        val suffix = " · ${formatBitrate(bitrate)}"
+        return SpannableString(name + suffix).apply {
+            setSpan(
+                RelativeSizeSpan(0.75f),
+                name.length,
+                name.length + suffix.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+    }
+
+    private fun formatBitrate(bitrate: Int): String {
+        return if (bitrate >= 1_000_000) {
+            val mbpsX10 = (bitrate + 50_000) / 100_000
+            "${mbpsX10 / 10}.${mbpsX10 % 10} Mbps"
+        } else {
+            "${bitrate / 1000} kbps"
+        }
+    }
+
     override fun showTracksDialogue() {
         try {
             //println("CURRENT SELECTED :$currentSelectedSubtitles of $currentSubs")
             context?.let { ctx ->
                 val tracks = player.getVideoTracks()
 
-                val currentVideoTracks = tracks.allVideoTracks.sortedBy {
-                    it.height?.times(-1)
-                }
+                val currentVideoTracks = tracks.allVideoTracks.sortedWith(
+                    compareByDescending<VideoTrack> { it.height ?: Int.MIN_VALUE }
+                        .thenByDescending { it.bitrate ?: Int.MIN_VALUE }
+                )
                 val currentAudioTracks = tracks.allAudioTracks.withHindiFirst()
                 val binding: PlayerSelectTracksBinding =
                     PlayerSelectTracksBinding.inflate(LayoutInflater.from(ctx), null, false)
@@ -1530,11 +1576,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
 
                 val videosArrayAdapter =
-                    ArrayAdapter<String>(ctx, R.layout.sort_bottom_single_choice)
+                    ArrayAdapter<CharSequence>(ctx, R.layout.sort_bottom_single_choice)
 
                 videosArrayAdapter.addAll(currentVideoTracks.mapIndexed { index, format ->
-                    format.label
-                        ?: (if (format.height == NO_VALUE || format.width == NO_VALUE) index else "${format.width}x${format.height}").toString()
+                    videoTrackLabel(index, format)
                 })
 
                 videosList.choiceMode = AbsListView.CHOICE_MODE_SINGLE
@@ -1665,9 +1710,10 @@ class GeneratorPlayer : FullScreenPlayer() {
 
                 val tracks = player.getVideoTracks()
 
-                val currentVideoTracks = tracks.allVideoTracks.sortedBy {
-                    it.height?.times(-1)
-                }
+                val currentVideoTracks = tracks.allVideoTracks.sortedWith(
+                    compareByDescending<VideoTrack> { it.height ?: Int.MIN_VALUE }
+                        .thenByDescending { it.bitrate ?: Int.MIN_VALUE }
+                )
                 val currentAudioTracks = tracks.allAudioTracks.withHindiFirst()
 
                 val videosList = binding.videoTracksList
@@ -1677,11 +1723,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                 binding.audioTracksHolder.isVisible = currentAudioTracks.size > 1
 
                 val videosArrayAdapter =
-                    ArrayAdapter<String>(ctx, R.layout.sort_bottom_single_choice)
+                    ArrayAdapter<CharSequence>(ctx, R.layout.sort_bottom_single_choice)
 
                 videosArrayAdapter.addAll(currentVideoTracks.mapIndexed { index, format ->
-                    format.label
-                        ?: (if (format.height == NO_VALUE || format.width == NO_VALUE) index else "${format.width}x${format.height}").toString()
+                    videoTrackLabel(index, format)
                 })
 
                 videosList.choiceMode = AbsListView.CHOICE_MODE_SINGLE
@@ -1940,11 +1985,31 @@ class GeneratorPlayer : FullScreenPlayer() {
         activity?.popCurrentPage()
     }
 
+    /**
+     * Starts playback with the best link that is already available when no preferred link
+     * shows up within [EARLY_START_DELAY_MS].
+     */
+    private fun scheduleFallbackStart() {
+        if (isPlayerActive.get() || startFallbackScheduled) return
+        startFallbackScheduled = true
+        startFallbackHandler.postDelayed({
+            startFallbackScheduled = false
+            if (!isAdded || isPlayerActive.get()) return@postDelayed
+            startPlayer()
+        }, EARLY_START_DELAY_MS)
+    }
+
+    private fun cancelFallbackStart() {
+        startFallbackScheduled = false
+        startFallbackHandler.removeCallbacksAndMessages(null)
+    }
+
     private fun startPlayer() {
         // We don't want double load when you skip loading
         if (isPlayerActive.get()) {
             return
         }
+        cancelFallbackStart()
 
         val maxVideoHeight = context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
         val links = viewModel.state.sortLinks(currentQualityProfile, maxVideoHeight)
@@ -2066,8 +2131,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     var maxEpisodeSet: Int? = null
     var hasRequestedStamps: Boolean = false
     override fun playerPositionChanged(position: Long, duration: Long) {
-        // Live streams have no meaningful progress. The Continue Watching entry is created
-        // once below (see setViewPosAndResume), and nothing else runs per tick.
+        // Live streams have no meaningful progress. The Continue Watching entry is kept in
+        // sync below (see setViewPosAndResume), which also refreshes its ordering timestamp.
         // NSFW static videos are seekable and follow the normal progress path.
         if (!isIncognito) {
             val isLiveStream = (currentMeta as? ResultEpisode)?.tvType?.isLiveStream() == true
@@ -2575,11 +2640,19 @@ fun releasePlayer() {
     currentSelectedSubtitles = null
     currentSelectedLink = null
     isPlayerActive.set(false)
+    cancelFallbackStart()
     binding?.overlayLoadingSkipButton?.isVisible = false
     binding?.playerLoadingOverlay?.isVisible = true
     viewModel.modifyState { setError(emptyList()) }
     uiReset()
 }
+
+    override fun onDestroyView() {
+        // Never start playback after the player view is gone (e.g. user pressed back while
+        // the early-start grace period was still running).
+        cancelFallbackStart()
+        super.onDestroyView()
+    }
 
 private fun releaseMediaNotification() {
     cachedPlayerNotificationManager?.setPlayer(null)
@@ -2769,12 +2842,19 @@ fun closePlayerForActivityDestroy() {
             }
 
             safe {
-                if (!isPlayerActive.get() && viewModel.state.links.any { link ->
+                if (!isPlayerActive.get() && usableLinks > 0) {
+                    val hasPreferredLink = viewModel.state.links.any { link ->
                         getLinkPriority(currentQualityProfile, link.first) >=
                                 QualityDataHelper.AUTO_SKIP_PRIORITY
                     }
-                ) {
-                    startPlayer()
+                    if (hasPreferredLink) {
+                        startPlayer()
+                    } else {
+                        // A normal 1080p link scores below AUTO_SKIP_PRIORITY, so waiting for
+                        // one means waiting until the extractor resolved every mirror. Start
+                        // with the best link available if no preferred one appears shortly.
+                        scheduleFallbackStart()
+                    }
                 }
             }
 

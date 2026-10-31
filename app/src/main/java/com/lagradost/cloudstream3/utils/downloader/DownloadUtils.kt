@@ -3,11 +3,13 @@ package com.lagradost.cloudstream3.utils.downloader
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.core.graphics.drawable.toBitmap
-import coil3.Extras
 import coil3.SingletonImageLoader
 import coil3.asDrawable
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import coil3.request.allowHardware
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
@@ -25,21 +27,49 @@ import java.util.concurrent.ConcurrentHashMap
 /** Separate object with helper functions for the downloader */
 object DownloadUtils {
     private val cachedBitmaps = ConcurrentHashMap<String, Bitmap>()
+
+    /**
+     * Loads [url] as a software bitmap, used for notification icons.
+     *
+     * @param headers optional HTTP headers (referer, cookies, ...). Without them,
+     *                protected posters answer with an error instead of an image.
+     * @param maxSizePx when set, the image is decoded downscaled so that its longest
+     *                  side is at most this many pixels. The aspect ratio is kept.
+     */
     internal fun Context.getImageBitmapFromUrl(
         url: String,
-        headers: Map<String, String>? = null
+        headers: Map<String, String>? = null,
+        maxSizePx: Int? = null
     ): Bitmap? = safe {
-        cachedBitmaps[url]?.let {
-            return@safe it
+        // Only full-size loads share the cache: a scaled copy must never replace the
+        // full-size bitmap other callers expect for the same URL.
+        if (maxSizePx == null) {
+            cachedBitmaps[url]?.let {
+                return@safe it
+            }
         }
 
         val imageLoader = SingletonImageLoader.get(this)
 
         val request = ImageRequest.Builder(this)
             .data(url)
+            // Notification bitmaps are parcelled to System UI, which cannot use
+            // hardware bitmaps.
+            .allowHardware(false)
             .apply {
-                headers?.forEach { (key, value) ->
-                    extras[Extras.Key<String>(key)] = value
+                if (maxSizePx != null) {
+                    // Equal bounds keep the aspect ratio while capping memory usage.
+                    size(maxSizePx, maxSizePx)
+                }
+                val requestHeaders = headers
+                if (!requestHeaders.isNullOrEmpty()) {
+                    httpHeaders(
+                        NetworkHeaders.Builder().also { builder ->
+                            requestHeaders.forEach { (key, value) ->
+                                builder[key] = value
+                            }
+                        }.build()
+                    )
                 }
             }
             .build()
@@ -50,8 +80,10 @@ object DownloadUtils {
                 ?.toBitmap()
         }
 
-        bitmap?.let {
-            cachedBitmaps.putIfAbsent(url, it)
+        if (maxSizePx == null) {
+            bitmap?.let {
+                cachedBitmaps.putIfAbsent(url, it)
+            }
         }
 
         return@safe bitmap

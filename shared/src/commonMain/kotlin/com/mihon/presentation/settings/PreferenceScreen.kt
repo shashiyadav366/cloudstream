@@ -4,15 +4,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import com.mihon.presentation.settings.widget.PreferenceGroupHeader
+import com.mihon.presentation.settings.widget.PrefsHorizontalPadding
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 
@@ -53,7 +56,14 @@ fun PreferenceScreen(
 
                     item {
                         Column {
-                            PreferenceGroupHeader(title = preference.title)
+                            PreferenceGroupHeader(
+                                title = preference.title,
+                                subtitle = preference.subtitle,
+                                bold = preference.titleBold,
+                                primary = preference.titlePrimary,
+                                bottomPadding = preference.headerBottomPaddingDp,
+                                widget = preference.headerWidget,
+                            )
                         }
                     }
                     items(preference.preferenceItems) { item ->
@@ -64,7 +74,14 @@ fun PreferenceScreen(
                     }
                     item {
                         if (i < items.lastIndex) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                            if (preference.showDividerAfter) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(
+                                        horizontal = PrefsHorizontalPadding
+                                    )
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(preference.spacingAfterDp.dp))
                         }
                     }
                 }

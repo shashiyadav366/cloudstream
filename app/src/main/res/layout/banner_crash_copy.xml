@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="top"
+    android:layout_marginHorizontal="16dp"
+    android:layout_marginVertical="8dp"
+    android:visibility="visible">
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="10dp"
+        android:background="@color/primaryGrayBackground">
+        <ImageView
+            android:id="@+id/crashBannerIcon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="6dp"
+            android:contentDescription="@string/safe_mode_description"
+            android:src="@drawable/ic_baseline_warning_24"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_bias="0.5"
+            app:tint="@color/colorAccent" />
+        <TextView
+            android:id="@+id/tv_crash_info_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="8dp"
+            android:maxLines="2"
+            android:ellipsize="marquee"
+            android:text="@string/safe_mode_description"
+            android:textColor="@color/textColor"
+            android:textSize="14sp"
+            app:layout_constraintStart_toEndOf="@id/crashBannerIcon"
+            app:layout_constraintEnd_toStartOf="@id/btn_copy_crash_info"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_bias="0.0"
+            app:layout_constraintVertical_bias="0.5"
+            tools:ignore="HardcodedText" />
+        <ImageButton
+            android:id="@+id/btn_copy_crash_info"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginTop="16dp"
+            android:contentDescription="@string/safe_mode_copy_clipboard"
+            android:src="@drawable/copy_all_24px"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/colorAccent"
+            app:backgroundTint="@color/colorPrimary" />
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/btn_done"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="6dp"
+            android:visibility="gone"
+            android:clickable="true"
+            android:foreground="?attr/selectableItemBackground"
+            android:src="@drawable/ic_baseline_close_24"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toTopOf="@id/btn_copy_crash_info"
+            app:layout_constraintHorizontal_chainStyle="packed"
+            app:tint="@color/colorAccent" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.cardview.widget.CardView>

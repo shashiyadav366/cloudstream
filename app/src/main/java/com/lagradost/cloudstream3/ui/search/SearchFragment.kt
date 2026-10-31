@@ -51,6 +51,7 @@ import com.lagradost.cloudstream3.plugins.RepositoryManager.getRepositoryAuthorF
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.BaseAdapter
 import com.lagradost.cloudstream3.ui.BaseFragment
+import com.lagradost.cloudstream3.ui.home.HomeCategorySettings
 import com.lagradost.cloudstream3.ui.home.HomeFragment
 import com.lagradost.cloudstream3.ui.home.HomeFragment.Companion.bindChips
 import com.lagradost.cloudstream3.ui.home.HomeFragment.Companion.currentSpan
@@ -190,6 +191,11 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                 name to getApiFromNameNull(name)?.supportedTypes
             }.filter { (_, types) ->
                 types?.any { preferredTypes.contains(it.ordinal) } == true
+            }.filter { (name, _) ->
+                // Providers whose categories have all been hidden are not
+                // searched anymore.
+                val api = getApiFromNameNull(name)
+                api == null || !HomeCategorySettings.isProviderFullyHidden(ctx, api)
             }
 
             searchViewModel.searchAndCancel(
@@ -289,9 +295,17 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
         binding.searchFilter.setOnClickListener { searchView ->
             searchView?.context?.let { ctx ->
                 val validAPIs = ctx.filterProviderByPreferredMedia(hasHomePageIsRequired = false)
+                    // Plugins whose categories have all been hidden are unchecked
+                    // and removed from the global search provider filter.
+                    .filterNot { api -> HomeCategorySettings.isProviderFullyHidden(ctx, api) }
                 var currentValidApis = listOf<MainAPI>()
-                val currentSelectedApis = if (selectedApis.isEmpty()) validAPIs.map { it.name }
-                    .toMutableSet() else selectedApis
+                val currentSelectedApis = if (selectedApis.isEmpty()) {
+                    validAPIs.map { it.name }.toMutableSet()
+                } else {
+                    selectedApis.filter { name ->
+                        validAPIs.any { api -> api.name == name }
+                    }.toMutableSet()
+                }
 
                 val builder =
                     BottomSheetDialog(ctx)

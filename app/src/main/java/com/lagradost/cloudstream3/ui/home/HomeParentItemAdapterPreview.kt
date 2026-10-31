@@ -30,8 +30,10 @@ import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.databinding.FragmentHomeHeadBinding
 import com.lagradost.cloudstream3.databinding.FragmentHomeHeadTvBinding
+import com.lagradost.cloudstream3.getSourcePlugin
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.debugException
 import com.lagradost.cloudstream3.mvvm.logError
@@ -64,6 +66,8 @@ import com.lagradost.cloudstream3.utils.UIHelper.fixPaddingStatusbarView
 import com.lagradost.cloudstream3.utils.UIHelper.populateChips
 import androidx.core.graphics.toColorInt
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
+
+private const val SLIDER_AUTO_SLIDE_INTERVAL_MS = 5_000L
 
 class HomeParentItemAdapterPreview(
     private val viewModel: HomeViewModel,
@@ -165,6 +169,37 @@ class HomeParentItemAdapterPreview(
             )
         }
 
+        private var latestPreview: Resource<Pair<Boolean, List<LoadResponse>>>? = null
+        private var livePreviewItems: List<LoadResponse> = emptyList()
+        private var showingLivePreview = false
+
+        private fun moveSlider(offset: Int) {
+            val count = previewAdapter.itemCount
+            if (count <= 1) return
+            val next = (previewViewpager.currentItem + offset).coerceIn(0, count - 1)
+            if (next != previewViewpager.currentItem) {
+                previewViewpager.setCurrentItem(next, true)
+            }
+        }
+
+        private val autoSlideRunnable = object : Runnable {
+            override fun run() {
+                moveSlider(1)
+                if (itemView.isAttachedToWindow) {
+                    itemView.postDelayed(this, SLIDER_AUTO_SLIDE_INTERVAL_MS)
+                }
+            }
+        }
+
+        private fun startAutoSlide() {
+            itemView.removeCallbacks(autoSlideRunnable)
+            itemView.postDelayed(autoSlideRunnable, SLIDER_AUTO_SLIDE_INTERVAL_MS)
+        }
+
+        private fun stopAutoSlide() {
+            itemView.removeCallbacks(autoSlideRunnable)
+        }
+
         private val resumeAdapter = ResumeItemAdapter(
             nextFocusUp = itemView.nextFocusUpId,
             nextFocusDown = itemView.nextFocusDownId,
@@ -200,6 +235,47 @@ class HomeParentItemAdapterPreview(
                     viewModel.click(callback)
                     return@ResumeItemAdapter
                 }
+
+                // The touch popup cannot be opened from a TV remote, so the same
+                // options are offered as a D-pad friendly dialog instead.
+                if (isLayout(TV or EMULATOR)) {
+                    showResumeCardMenu(callback.view.context) { option ->
+                        when (option) {
+                            ResumeCardOption.Play -> viewModel.click(
+                                SearchClickCallback(
+                                    START_ACTION_RESUME_LATEST,
+                                    callback.view,
+                                    -1,
+                                    callback.card
+                                )
+                            )
+
+                            ResumeCardOption.MoreInfo -> viewModel.click(
+                                SearchClickCallback(
+                                    SEARCH_ACTION_LOAD,
+                                    callback.view,
+                                    -1,
+                                    callback.card
+                                )
+                            )
+
+                            ResumeCardOption.Remove -> {
+                                val card = callback.card
+                                if (card is DataStoreHelper.ResumeWatchingResult) {
+                                    DataStoreHelper.removeResumeWatching(
+                                        card.parentId,
+                                        card.id,
+                                        card.url,
+                                        card.sourcePlugin
+                                    )
+                                    viewModel.reloadStored()
+                                }
+                            }
+                        }
+                    }
+                    return@ResumeItemAdapter
+                }
+
                 callback.view.context?.getActivity()?.showOptionSelectStringRes(
                     callback.view,
                     callback.card.posterUrl,
@@ -362,6 +438,9 @@ private val headProfilePicCard: View? =
 private val headReloadProvider: View? =
     itemView.findViewById(R.id.home_head_reload_provider)
 
+private val alternateHeadReloadProvider: View? =
+    itemView.findViewById(R.id.alternate_home_head_reload_provider)
+
 private val alternateHeadProfilePic: ImageView? =
     itemView.findViewById(R.id.alternate_home_head_profile_pic)
 
@@ -519,18 +598,18 @@ private val homeNonePadding: View =
         private val previewCallback: ViewPager2.OnPageChangeCallback =
             object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
-                    previewAdapter.apply {
-                        if (position >= itemCount - 1 && hasMoreItems) {
-                            hasMoreItems = false // don't make two requests
-                            viewModel.loadMoreHomeScrollResponses()
-                        }
+                    val realPosition = previewAdapter.realPosition(position)
+                    if (previewAdapter.isLastItem(position) && previewAdapter.hasMoreItems) {
+                        previewAdapter.hasMoreItems = false // don't make two requests
+                        viewModel.loadMoreHomeScrollResponses()
                     }
                     val item = previewAdapter.getItemOrNull(position) ?: return
-                    onSelect(item, position)
+                    onSelect(item, realPosition)
                 }
             }
 
         fun onViewDetachedFromWindow() {
+            stopAutoSlide()
             previewViewpager.unregisterOnPageChangeCallback(previewCallback)
         }
 
@@ -546,11 +625,7 @@ private val homeNonePadding: View =
 
         fun bind() {
     headReloadProvider?.setOnClickListener {
-        viewModel.loadAndCancel(
-            viewModel.apiName.value ?: noneApi.name,
-            forceReload = true,
-            fromUI = true
-        )
+        viewModel.reloadHomeFromUI()
         showToast(R.string.action_reload, Toast.LENGTH_SHORT)
     }
 }
@@ -605,6 +680,14 @@ private val homeNonePadding: View =
                 activity?.showAccountSelectLinear()
             }
 
+            // The hero preview header (search, reload, profile) is hidden when the
+            // selected provider has no preview — custom merged sources have none —
+            // so the fallback header needs its own reload action.
+            alternateHeadReloadProvider?.setOnClickListener {
+                viewModel.reloadHomeFromUI()
+                showToast(R.string.action_reload, Toast.LENGTH_SHORT)
+            }
+
             fun showAccountEditBox(context: Context): Boolean {
                 val currentAccount = DataStoreHelper.getCurrentAccount()
                 return if (currentAccount != null) {
@@ -642,11 +725,7 @@ private val homeNonePadding: View =
                     }
                 }
                 homePreviewReloadProvider.setOnClickListener {
-                    viewModel.loadAndCancel(
-                        viewModel.apiName.value ?: noneApi.name,
-                        forceReload = true,
-                        fromUI = true
-                    )
+                    viewModel.reloadHomeFromUI()
                     showToast(R.string.action_reload, Toast.LENGTH_SHORT)
                     true
                 }
@@ -671,7 +750,7 @@ private val homeNonePadding: View =
 
                 homePreviewHiddenNextFocus.setOnFocusChangeListener { _, hasFocus ->
                     if (!hasFocus) return@setOnFocusChangeListener
-                    previewViewpager.setCurrentItem(previewViewpager.currentItem + 1, true)
+                    moveSlider(1)
                     homePreviewInfoBtt.requestFocus()
                 }
 
@@ -705,7 +784,40 @@ private val homeNonePadding: View =
             }
         }
 
+        private fun SearchResponse.toSliderResponse(): LoadResponse =
+            ResultViewModel2.LoadResponseFromSearch(
+                name = name,
+                url = url,
+                apiName = apiName,
+                type = type ?: TvType.Live,
+                posterUrl = posterUrl,
+                score = score,
+                posterHeaders = posterHeaders,
+                id = id,
+                sourcePlugin = getSourcePlugin(),
+            )
+
         private fun updatePreview(preview: Resource<Pair<Boolean, List<LoadResponse>>>) {
+            latestPreview = preview
+            renderSlider()
+        }
+
+        private fun renderSlider() {
+            if (livePreviewItems.isNotEmpty()) {
+                showSlider(Resource.Success(false to livePreviewItems), isLive = true)
+            } else {
+                latestPreview?.let { showSlider(it, isLive = false) }
+            }
+        }
+
+        private fun showSlider(
+            preview: Resource<Pair<Boolean, List<LoadResponse>>>,
+            isLive: Boolean,
+        ) {
+            val resetToFirst = showingLivePreview != isLive
+            if (resetToFirst) {
+                showingLivePreview = isLive
+            }
             if (preview is Resource.Success) {
                 homeNonePadding.apply {
                     val params = layoutParams
@@ -718,8 +830,11 @@ private val homeNonePadding: View =
                 is Resource.Success -> {
                     homePreviewShimmer?.stopShimmer()
                     homePreviewShimmer?.isGone = true
-                    previewAdapter.submitList(preview.value.second)
-                    previewAdapter.hasMoreItems = preview.value.first
+                    val items = preview.value.second
+                    val previousPosition =
+                        previewAdapter.realPosition(previewViewpager.currentItem)
+                    previewAdapter.submitList(items)
+                    previewAdapter.hasMoreItems = preview.value.first && !isLive
                     /*if (!.setItems(
                             preview.value.second,
                             preview.value.first
@@ -742,10 +857,17 @@ private val homeNonePadding: View =
                         homePreviewInfoBtt.isVisible = true
                     }
                     // Explicitly bind the current item to ensure instant loading
-                    val currentPos = previewViewpager.currentItem
-                    val item = preview.value.second.getOrNull(currentPos)
-                    if (item != null) {
-                        onSelect(item, currentPos)
+                    if (items.isNotEmpty()) {
+                        val currentPos = if (resetToFirst) {
+                            0
+                        } else {
+                            previousPosition.coerceIn(0, items.lastIndex)
+                        }
+                        val target = previewAdapter.centeredPosition(currentPos)
+                        if (previewViewpager.currentItem != target) {
+                            previewViewpager.setCurrentItem(target, false)
+                        }
+                        onSelect(items[currentPos], currentPos)
                     }
                 }
 
@@ -776,6 +898,14 @@ private val homeNonePadding: View =
             val show = matches.isNotEmpty()
             cricketHolder.isVisible = show
             cricketAdapter.submitList(matches)
+
+            // Only matches that are streaming right now go in the hero slider. The row
+            // keeps today's scheduled events too. Clearing the live list falls back to
+            // the provider preview that is kept in latestPreview.
+            livePreviewItems = matches
+                .filter { LiveEventNotifier.isCurrentlyLive(it) }
+                .map { it.toSliderResponse() }
+            renderSlider()
 
             val cricketTitle =
                 (binding as? FragmentHomeHeadBinding)?.homeCricketParentItemTitle
@@ -868,6 +998,7 @@ private val homeNonePadding: View =
 
         fun onViewAttachedToWindow() {
             previewViewpager.registerOnPageChangeCallback(previewCallback)
+            startAutoSlide()
 
             previewViewpager.apply {
                 observe(viewModel.preview) {
@@ -900,4 +1031,29 @@ private val homeNonePadding: View =
             }
         }
     }
+}
+
+private enum class ResumeCardOption { Play, MoreInfo, Remove }
+
+/**
+ * Options for a single Continue Watching card. Uses a plain list dialog so it
+ * stays usable with a D-pad, unlike the touch popup used on phones.
+ */
+private fun showResumeCardMenu(
+    context: Context,
+    onSelected: (ResumeCardOption) -> Unit,
+) {
+    val options = listOf(
+        ResumeCardOption.Play to context.getString(R.string.action_open_play),
+        ResumeCardOption.MoreInfo to context.getString(R.string.action_open_watching),
+        ResumeCardOption.Remove to context.getString(R.string.action_remove_watching),
+    )
+    AlertDialog.Builder(context)
+        .setTitle(R.string.continue_watching)
+        .setItems(options.map { it.second }.toTypedArray()) { _, which ->
+            onSelected(options[which].first)
+        }
+        .setNegativeButton(R.string.cancel, null)
+        .show()
+        .setDefaultFocus()
 }

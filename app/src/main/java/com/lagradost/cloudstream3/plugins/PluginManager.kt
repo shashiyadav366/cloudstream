@@ -47,6 +47,7 @@ import com.lagradost.cloudstream3.plugins.RepositoryManager.PREBUILT_REPOSITORIE
 import com.lagradost.cloudstream3.plugins.RepositoryManager.downloadPluginToFile
 import com.lagradost.cloudstream3.plugins.RepositoryManager.getRepoPlugins
 import com.lagradost.cloudstream3.plugins.RepositoryManager.sha256
+import com.lagradost.cloudstream3.ui.home.LiveEventNotifier
 import com.lagradost.cloudstream3.ui.settings.extensions.REPOSITORIES_KEY
 import com.lagradost.cloudstream3.ui.settings.extensions.RepositoryData
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiProviderLangSettings
@@ -328,6 +329,8 @@ object PluginManager {
 
     private val LOCAL_PLUGINS_PATH = CLOUD_STREAM_FOLDER + "plugins"
 
+    private const val PLUGIN_LOAD_BATCH_SIZE = 3
+
     var currentlyLoading: String? = null
 
     // Maps filepath to plugin
@@ -381,14 +384,19 @@ object PluginManager {
 
     // var allCurrentOutDatedPlugins: Set<OnlinePluginData> = emptySet()
 
+    /**
+     * Matches a plugin file against a provider name. Most internal names end with
+     * "Provider", which is not part of the api name, and the two are not guaranteed to
+     * share casing ("playfy" vs "PlayFy"), so compare case-insensitively. Only widens
+     * matching: everything that matched before still matches.
+     */
+    private fun matchesApiName(data: PluginData, apiName: String): Boolean =
+        data.internalName.replace("provider", "", ignoreCase = true)
+            .equals(apiName, ignoreCase = true)
+
     suspend fun loadSinglePlugin(context: Context, apiName: String): Boolean {
-        return (getPluginsOnline().firstOrNull {
-            // Most of the time the provider ends with Provider which isn't part of the api name
-            it.internalName.replace("provider", "", ignoreCase = true) == apiName
-        }
-            ?: getPluginsLocal().firstOrNull {
-                it.internalName.replace("provider", "", ignoreCase = true) == apiName
-            })?.let { savedData ->
+        return (getPluginsOnline().firstOrNull { matchesApiName(it, apiName) }
+            ?: getPluginsLocal().firstOrNull { matchesApiName(it, apiName) })?.let { savedData ->
             // OnlinePluginData(savedData, onlineData)
             loadPlugin(
                 context,
@@ -396,6 +404,34 @@ object PluginManager {
                 savedData
             )
         } ?: false
+    }
+
+    /**
+     * Loads the downloaded live-event providers, PlayFy before Cricify. Local
+     * plugins are intentionally not touched here: their persisted paths can be
+     * stale, and the normal local-plugin loader copies and loads them safely later.
+     */
+    suspend fun loadLiveEventPlugins(context: Context) {
+        // The row is opt-in. When it is off these two plugins are still loaded by the normal
+        // loader later; loading them first would only delay the home provider by two dex loads.
+        if (!LiveEventNotifier.isEnabled(context)) return
+
+        val livePlugins = getPluginsOnline()
+            .filter {
+                it.internalName.contains("playfy", ignoreCase = true) ||
+                    it.internalName.contains("cricify", ignoreCase = true)
+            }
+            .sortedBy {
+                if (it.internalName.contains("playfy", ignoreCase = true)) 0 else 1
+            }
+
+        for (plugin in livePlugins) {
+            val file = File(plugin.filePath)
+            if (!file.exists()) continue
+            // This is an early priority load. If it fails, the normal loader will
+            // retry after the update check, so don't show a misleading toast yet.
+            loadPlugin(context, file, plugin, showErrorToast = false)
+        }
     }
 
     /**
@@ -618,13 +654,16 @@ object PluginManager {
     suspend fun ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(context: Context) {
         assertNonRecursiveCallstack()
 
-        // Load all plugins as fast as possible!
-        (getPluginsOnline()).toList().amap { pluginData ->
-            loadPlugin(
-                context,
-                File(pluginData.filePath),
-                pluginData
-            )
+        // Load only a few plugins at a time. Loading every .cs3 at once can make
+        // class loading fail on slower devices and during startup.
+        (getPluginsOnline()).toList().chunked(PLUGIN_LOAD_BATCH_SIZE).forEach { batch ->
+            batch.amap { pluginData ->
+                loadPlugin(
+                    context,
+                    File(pluginData.filePath),
+                    pluginData
+                )
+            }
         }
     }
 
@@ -690,33 +729,37 @@ object PluginManager {
         // Make sure all local plugins are fully refreshed.
         removeKey(PLUGINS_KEY_LOCAL)
 
-        sortedPlugins?.sortedBy { it.name }?.amap { file ->
-            try {
-                val destinationFile = File(pluginDirectory, file.name)
+        sortedPlugins?.sortedBy { it.name }
+            ?.chunked(PLUGIN_LOAD_BATCH_SIZE)
+            ?.forEach { batch ->
+                batch.amap { file ->
+                    try {
+                        val destinationFile = File(pluginDirectory, file.name)
 
-                // Only copy the file if the destination file doesn't exist or if it
-                // has been modified (check file length and modification time).
-                if (!destinationFile.exists() ||
-                    destinationFile.length() != file.length() ||
-                    destinationFile.lastModified() != file.lastModified()
-                ) {
+                        // Only copy the file if the destination file doesn't exist or if it
+                        // has been modified (check file length and modification time).
+                        if (!destinationFile.exists() ||
+                            destinationFile.length() != file.length() ||
+                            destinationFile.lastModified() != file.lastModified()
+                        ) {
 
-                    // Copy the file to the app-specific plugin directory
-                    file.copyTo(destinationFile, overwrite = true)
+                            // Copy the file to the app-specific plugin directory
+                            file.copyTo(destinationFile, overwrite = true)
 
-                    // After copying, set the destination file's modification time
-                    // to match the source file. We do this for performance so that we
-                    // can check the modification time and not make redundant writes.
-                    destinationFile.setLastModified(file.lastModified())
+                            // After copying, set the destination file's modification time
+                            // to match the source file. We do this for performance so that we
+                            // can check the modification time and not make redundant writes.
+                            destinationFile.setLastModified(file.lastModified())
+                        }
+
+                        // Load the plugin after it has been copied
+                        maybeLoadPlugin(context, destinationFile)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Failed to copy the file")
+                        logError(t)
+                    }
                 }
-
-                // Load the plugin after it has been copied
-                maybeLoadPlugin(context, destinationFile)
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to copy the file")
-                logError(t)
             }
-        }
 
         loadedLocalPlugins = true
         afterPluginsLoadedEvent.invoke(forceReload)
@@ -745,15 +788,28 @@ object PluginManager {
     /**
      * @return True if successful, false if not
      * */
-    internal suspend fun loadPlugin(context: Context, file: File, data: PluginData): Boolean {
+    internal suspend fun loadPlugin(
+        context: Context,
+        file: File,
+        data: PluginData,
+        showErrorToast: Boolean = true,
+    ): Boolean {
         // Blocked plugins must never become active, even if a file for them still exists.
         if (isPluginIgnored(data.internalName, data.url)) {
             Log.i(TAG, "Skipping load of ignored plugin: ${data.internalName}")
             return false
         }
 
-        val fileName = file.nameWithoutExtension
+        // Skip everything below for an already loaded file: the class loader, manifest
+        // parse and plugin construction are wasted work, and the priority (live event)
+        // load and the normal loader can both reach the same file.
         val filePath = file.absolutePath
+        if (plugins.containsKey(filePath)) {
+            Log.i(TAG, "Plugin ${data.internalName} is already loaded")
+            return true
+        }
+
+        val fileName = file.nameWithoutExtension
         currentlyLoading = fileName
         Log.i(TAG, "Loading plugin: $data")
 
@@ -837,11 +893,13 @@ object PluginManager {
             true
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to load $file: ${Log.getStackTraceString(e)}")
-            showToast(
-                // context.getActivity(), // we are not always on the main thread
-                context.getString(R.string.plugin_load_fail).format(fileName),
-                Toast.LENGTH_LONG
-            )
+            if (showErrorToast) {
+                showToast(
+                    // context.getActivity(), // we are not always on the main thread
+                    context.getString(R.string.plugin_load_fail).format(fileName),
+                    Toast.LENGTH_LONG
+                )
+            }
             currentlyLoading = null
             false
         }
@@ -1071,6 +1129,7 @@ object PluginManager {
         val updatedPlugins = mutableListOf<String>()
 
         allPlugins.amap { pluginData ->
+            // Blocked/ignored plugins must never be (re)installed: uninstall them and skip.
             if (isPluginIgnored(
                     pluginData.savedData.internalName,
                     pluginData.savedData.url ?: pluginData.onlineData.plugin.url
