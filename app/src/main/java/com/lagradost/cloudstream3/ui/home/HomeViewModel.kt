@@ -75,6 +75,14 @@ class HomeViewModel : ViewModel() {
         private const val CRICKET_LIVE_RETRY_MS = 750L
         private const val CRICKET_LIVE_MAX_RETRIES = 10
 
+        // A custom home entry is assembled from whatever plugins are loaded, and the
+        // plugin-loaded event fires several times per cold start. Let the batches
+        // settle, then rebuild the entry once so it shows every category without a
+        // manual refresh.
+        private const val CUSTOM_HOME_REFRESH_DELAY_MS = 1500L
+        // Safety net: if home is still waiting for a custom entry and no plugin
+        // event arrives again, fill it in anyway instead of spinning forever.
+        private const val CUSTOM_HOME_WAIT_FALLBACK_MS = 8000L
         suspend fun getResumeWatching(): List<DataStoreHelper.ResumeWatchingResult>? {
             val resumeWatching = withContext(Dispatchers.IO) {
                 DataStoreHelper.getAllResumeStates()?.sortedBy { -it.updateTime }
@@ -871,6 +879,7 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun afterPluginsLoaded(forceReload: Boolean) {
+        scheduleCustomHomeRefresh(CUSTOM_HOME_REFRESH_DELAY_MS)
         loadAndCancel(DataStoreHelper.currentHomePage, forceReload)
         // Live cards can only be validated once the plugins that own them are loaded.
         loadResumeWatching()
@@ -882,9 +891,61 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun afterMainPluginsLoaded(unused: Boolean = false) {
+        scheduleCustomHomeRefresh(CUSTOM_HOME_REFRESH_DELAY_MS)
         loadAndCancel(DataStoreHelper.currentHomePage, false)
         loadResumeWatching()
         loadCricketLive()
+    }
+
+    private var customHomeRefreshJob: Job? = null
+    // Set when the wait fallback gave up on a custom entry: from then on load
+    // whatever is buildable instead of holding the home screen in loading state.
+    private var customHomeWaitExpired = false
+
+    /** True when the selected homepage is one of the user's own custom entries. */
+    private fun isCustomHomeSelected(): Boolean {
+        val ctx = context ?: return false
+        val name = DataStoreHelper.currentHomePage ?: return false
+        if (name == noneApi.name || name == randomApi.name) return false
+        return CustomHomeSources.findByName(ctx, name) != null
+    }
+
+    /**
+     * True when the custom entry on screen was built from fewer plugins than it can
+     * resolve now — the cold-start case where its plugins finished loading after the
+     * page was rendered. The comparison runs purely on in-memory plugin state: no
+     * network, no provider request, nothing to wait for.
+     */
+    private fun customHomeIsStale(): Boolean {
+        val ctx = context ?: return false
+        val name = DataStoreHelper.currentHomePage ?: return false
+        if (name == noneApi.name || name == randomApi.name) return false
+        val source = CustomHomeSources.findByName(ctx, name) ?: return false
+        val expected = CustomHomeSourceApi.resolvableCount(source, ctx)
+        val current = repo?.api
+        if (current == null || current.name != name) return expected > 0
+        return current.mainPage.size != expected
+    }
+
+    /**
+     * Rebuilds a custom homepage once, after the plugin batches of a cold start have
+     * settled: one scheduled load instead of one fetch per plugin-loaded event. A
+     * rebuild only happens when the entry would actually show more than what is on
+     * screen, and never while a request for it is already in flight, so the network
+     * stays quiet and the flow stays smooth.
+     */
+    private fun scheduleCustomHomeRefresh(delayMs: Long, expireWait: Boolean = false) {
+        if (!isCustomHomeSelected()) return
+        customHomeRefreshJob?.cancel()
+        customHomeRefreshJob = viewModelScope.launchSafe {
+            delay(delayMs)
+            if (expireWait) customHomeWaitExpired = true
+            val stale = customHomeIsStale()
+            val waiting = page.value !is Resource.Success
+            if (stale || (waiting && isCurrentlyLoadingName == null)) {
+                loadAndCancel(DataStoreHelper.currentHomePage, true)
+            }
+        }
     }
 
     private fun reloadHome(unused: Boolean = false) {
@@ -1018,6 +1079,28 @@ class HomeViewModel : ViewModel() {
             if (customSource != null) {
                 val customApi = context?.let {
                     CustomHomeSourceApi.create(customSource, it)
+                }
+                val pluginsReady =
+                    PluginManager.loadedOnlinePlugins || PluginManager.isSafeMode()
+                if (!fromUI && !pluginsReady && !customHomeWaitExpired) {
+                    // The plugins behind this entry are still arriving, and a custom
+                    // entry can only be built from the providers that are loaded.
+                    // Building it now would put "None" (or a page with just the two
+                    // categories that happened to be ready) on screen and force a
+                    // second full fetch later. Keep the custom name selected with the
+                    // loading state instead — no request goes out until the entry can
+                    // be built completely, then it loads once, in full.
+                    val alreadyWaiting = page.value is Resource.Loading
+                    _page.postValue(Resource.Loading())
+                    _apiName.postValue(customSource.name)
+                    if (!alreadyWaiting || customHomeRefreshJob?.isActive != true) {
+                        // Safety net: keep a fallback pending so home can never hang
+                        // here — if no plugin event arrives again, give up waiting
+                        // after the fallback and load whatever is buildable.
+                        scheduleCustomHomeRefresh(CUSTOM_HOME_WAIT_FALLBACK_MS, expireWait = true)
+                    }
+                    reloadAccount()
+                    return@ioSafe
                 }
                 if (customApi == null) {
                     if (fromUI) {

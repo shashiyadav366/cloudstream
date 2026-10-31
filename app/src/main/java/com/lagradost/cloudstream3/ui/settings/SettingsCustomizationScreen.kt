@@ -56,6 +56,25 @@ object SettingsCustomizationScreen : SearchableSettings {
                         preference = settings.general.liveCricketEvents
                     )
                 )
+            ),
+            // Playlists keep their own section below the home settings, so the
+            // M3U player entries are not mixed into Home categories or Custom
+            // home plugins.
+            Preference.PreferenceGroup(
+                title = stringResource(R.string.customization_playlists_title),
+                subtitle = stringResource(R.string.customization_playlists_description),
+                preferenceItems = persistentListOf(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(R.string.m3u_playlists_title),
+                        subtitle = stringResource(R.string.m3u_playlists_manage_description),
+                        icon = painterResource(R.drawable.ic_baseline_playlist_play_24),
+                        onClick = {
+                            activity?.navigate(
+                                R.id.action_navigation_settings_customization_to_navigation_m3u_playlists
+                            )
+                        }
+                    )
+                )
             )
         )
     }

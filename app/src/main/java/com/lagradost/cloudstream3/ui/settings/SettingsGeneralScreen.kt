@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -54,6 +55,7 @@ import com.lagradost.cloudstream4.rememberAppSettings
 import com.lagradost.cloudstream4.theme.CloudStreamPreviewTheme
 import com.lagradost.safefile.SafeFile
 import com.mihon.presentation.settings.Preference
+import com.mihon.presentation.settings.Preference.PreferenceItem
 import com.mihon.presentation.settings.SearchableSettings
 import com.mihon.presentation.settings.collectAsState
 import kotlinx.collections.immutable.persistentListOf
@@ -164,6 +166,8 @@ object SettingsGeneralScreen : SearchableSettings {
             )
         }
 
+        // Extension language list: "All languages" plus every language any
+        // installed provider serves.
         val default = AllLanguagesName to stringResource(R.string.all_languages_preference)
         val languages = APIHolder.apis.withLock {
             APIHolder.apis.map { api -> api.lang }.distinct()
@@ -337,7 +341,7 @@ object SettingsGeneralScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(R.string.cs3wiki),
                         subtitle = "https://cloudstream.miraheze.org/",
-                        icon = painterResource(R.drawable.description_24px),
+                        icon = painterResource(R.drawable.baseline_description_24),
                         onClick = {
                             CloudStreamApp.openBrowser("https://cloudstream.miraheze.org/")
                         }

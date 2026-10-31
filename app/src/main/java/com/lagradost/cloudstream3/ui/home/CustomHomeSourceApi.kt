@@ -11,6 +11,8 @@ import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.setSourcePlugin
 import com.lagradost.cloudstream3.ui.APIRepository
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -27,8 +29,16 @@ class CustomHomeSourceApi private constructor(
     private val entries: List<Pair<CustomHomeSources.CategoryRef, MainAPI>>,
 ) : MainAPI() {
     companion object {
-        fun create(source: CustomHomeSources.Source, context: Context): CustomHomeSourceApi? {
-            val entries = source.categories.mapNotNull { ref ->
+        /**
+         * The categories of [source] that resolve to a loadable provider right now,
+         * applying the same blocking/hidden rules as [create]. Changes as plugins
+         * finish loading, which is what makes a custom entry grow on a cold start.
+         */
+        fun resolveEntries(
+            source: CustomHomeSources.Source,
+            context: Context,
+        ): List<Pair<CustomHomeSources.CategoryRef, MainAPI>> {
+            return source.categories.mapNotNull { ref ->
                 val api = CustomHomeSources.resolveApi(ref)
                     ?.takeUnless { CustomHomeSources.isBlockedProvider(it) }
                     ?: return@mapNotNull null
@@ -46,9 +56,21 @@ class CustomHomeSourceApi private constructor(
                 }
                 ref to api
             }
+        }
+
+        fun create(source: CustomHomeSources.Source, context: Context): CustomHomeSourceApi? {
+            val entries = resolveEntries(source, context)
             if (entries.isEmpty()) return null
             return CustomHomeSourceApi(source, entries)
         }
+
+        /**
+         * How many categories the entry would show if it were built right now.
+         * Used to notice that the page on screen was built before every plugin
+         * behind it had loaded.
+         */
+        fun resolvableCount(source: CustomHomeSources.Source, context: Context): Int =
+            resolveEntries(source, context).size
     }
 
     override var name: String = source.name
@@ -66,6 +88,30 @@ class CustomHomeSourceApi private constructor(
      * load its own item URLs. Populated when the categories are loaded.
      */
     private val pluginByUrl = ConcurrentHashMap<String, String>()
+
+    /**
+     * Only the categories the user actually picked are ever requested: declared
+     * categories map to exactly one row request each. A category that is *not*
+     * declared in the plugin metadata can only be found by loading that provider's
+     * homepage, so that result is remembered per provider and page: several
+     * categories from the same plugin cost one fetch instead of one each, and two
+     * categories of the same plugin never fetch it at the same time.
+     */
+    private val providerPages = ConcurrentHashMap<String, List<HomePageResponse?>>()
+    private val providerPageLocks = ConcurrentHashMap<String, Mutex>()
+
+    private suspend fun providerHomepage(api: MainAPI, page: Int): List<HomePageResponse?> {
+        val key = "${HomeCategorySettings.providerKey(api)}|$page"
+        providerPages[key]?.let { return it }
+        val lock = providerPageLocks.computeIfAbsent(key) { Mutex() }
+        return lock.withLock {
+            providerPages[key]?.let { return it }
+            val pages = (APIRepository(api).getMainPage(page) as? Resource.Success)?.value
+                ?: emptyList()
+            providerPages[key] = pages
+            pages
+        }
+    }
 
     override val mainPage: List<MainPageData> = entries.mapIndexed { index, (ref, _) ->
         // Keep section names short, but disambiguate identical category names
@@ -97,15 +143,14 @@ class CustomHomeSourceApi private constructor(
             )
         } else {
             // A category discovered on a dynamic homepage is not declared in
-            // plugin metadata. Load that homepage once and pick the matching
-            // row, so it can still be merged into a custom provider.
-            val result = APIRepository(api).getMainPage(page)
-            val row = (result as? Resource.Success)
-                ?.value
-                ?.asSequence()
-                ?.filterNotNull()
-                ?.flatMap { it.items.asSequence() }
-                ?.firstOrNull {
+            // plugin metadata. That provider's homepage is loaded once and shared
+            // by every dynamic category of the same plugin, then the matching row
+            // is picked, so nothing is fetched twice.
+            val row = providerHomepage(api, page)
+                .asSequence()
+                .filterNotNull()
+                .flatMap { it.items.asSequence() }
+                .firstOrNull {
                     HomeCategorySettings.normalize(it.name) ==
                         HomeCategorySettings.normalize(ref.category)
                 }

@@ -29,6 +29,8 @@ import com.lagradost.cloudstream3.syncproviders.providers.KitsuApi.Companion.KIT
 import com.lagradost.cloudstream3.ui.home.HomeCategorySettings
 import com.lagradost.cloudstream3.ui.home.ChildProviderSettings
 import com.lagradost.cloudstream3.ui.home.CustomHomeSources
+import com.lagradost.cloudstream3.ui.playlists.M3uPlaylist
+import com.lagradost.cloudstream3.ui.playlists.M3uPlaylistSettings
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
@@ -192,6 +194,11 @@ object BackupUtils {
         // not in the datastore/settings above. Keyed by preference file name.
         @JsonProperty("plugin_prefs") @SerialName("plugin_prefs")
         val pluginPrefs: Map<String, Map<String, Boolean>>? = null,
+        // M3U playlists are stored as JSON in the M3U player plugin's own
+        // preference file, so carry them as entries of their own. Nullable so
+        // backups made before this field existed still restore.
+        @JsonProperty("m3u_playlists") @SerialName("m3u_playlists")
+        val m3uPlaylists: List<M3uPlaylist>? = null,
     )
 
     /** Keys of the cached card details that Continue Watching needs to show an entry. */
@@ -246,6 +253,7 @@ object BackupUtils {
             allDataSorted,
             allSettingsSorted,
             ChildProviderSettings.backup(context),
+            M3uPlaylistSettings.backup(context),
         )
     }
 
@@ -269,6 +277,14 @@ object BackupUtils {
             // Cricify/PlayFy, so restore them explicitly.
             backupFile.pluginPrefs?.let {
                 ChildProviderSettings.restore(context, it)
+            }
+
+            // M3U playlists are JSON inside the M3U player plugin's own preference
+            // file, so restore them explicitly too, then re-run the plugin when it
+            // is installed so the restored playlists play without retyping them.
+            backupFile.m3uPlaylists?.let { entries ->
+                M3uPlaylistSettings.restore(context, entries)
+                context.ioSafe { M3uPlaylistSettings.reload(it) }
             }
         }
 
