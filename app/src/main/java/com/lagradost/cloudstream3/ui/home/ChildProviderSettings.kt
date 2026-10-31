@@ -42,7 +42,9 @@ object ChildProviderSettings {
     /** Groups of child providers for every loaded plugin that exposes a list. */
     fun groups(context: Context): List<ChildProviderGroup> {
         val appContext = context.applicationContext
-        return PluginManager.plugins.mapNotNull { (path, basePlugin) ->
+        // Snapshot the plugins map to avoid ConcurrentModificationException
+        // when plugins are loaded/unloaded concurrently.
+        return PluginManager.plugins.toList().mapNotNull { (path, basePlugin) ->
             val plugin = basePlugin as? Plugin ?: return@mapNotNull null
             val titles = readChildTitles(plugin) ?: return@mapNotNull null
             if (titles.size <= 1) return@mapNotNull null
