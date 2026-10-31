@@ -875,7 +875,10 @@ class HomeViewModel : ViewModel() {
 
     private fun afterPluginsLoaded(forceReload: Boolean) {
         scheduleCustomHomeRefresh(CUSTOM_HOME_REFRESH_DELAY_MS)
-        loadAndCancel(DataStoreHelper.currentHomePage, forceReload)
+        // Don't force reload on plugin-loaded events — the page already loads with
+        // available plugins, and forcing reposts Resource.Loading() ~7× per cold start,
+        // causing black screen jitter. The early-return guard skips if content exists.
+        loadAndCancel(DataStoreHelper.currentHomePage, false)
         // Live cards can only be validated once the plugins that own them are loaded.
         loadResumeWatching()
         // Do not force: this event fires several times per cold start, and forcing cancels
