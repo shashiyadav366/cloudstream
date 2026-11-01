@@ -45,6 +45,7 @@ fun BasePreferenceWidget(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     widget: @Composable (() -> Unit)? = null,
+    compactTitle: Boolean = false,
 ) {
     val highlighted = LocalPreferenceHighlighted.current
     val minHeight = LocalPreferenceMinHeight.current
@@ -74,8 +75,12 @@ fun BasePreferenceWidget(
                     text = title,
                     overflow = TextOverflow.Ellipsis,
                     maxLines = 2,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontSize = TitleFontSize,
+                    style = if (compactTitle) {
+                        MaterialTheme.typography.bodyLarge
+                    } else {
+                        MaterialTheme.typography.titleLarge
+                    },
+                    fontSize = if (compactTitle) 14.sp else TitleFontSize,
                 )
             }
             subcomponent?.invoke(this)

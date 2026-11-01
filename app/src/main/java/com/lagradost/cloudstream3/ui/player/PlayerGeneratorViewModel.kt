@@ -28,9 +28,11 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.collections.immutable.toPersistentSet
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.Contract
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -298,15 +300,19 @@ class PlayerGeneratorViewModel : ViewModel() {
         currentJob = viewModelScope.launch {
             try {
                 if (generator?.hasCache == true && generator?.hasNext(episodeIndex) == true) {
-                    safeApiCall {
-                        generator?.generateLinks(
-                            sourceTypes = LOADTYPE_INAPP,
-                            clearCache = false,
-                            isCasting = false,
-                            callback = {},
-                            subtitleCallback = {},
-                            offset = episodeIndex + 1
-                        )
+                    // Preloading runs the provider's extractor, which is CPU/parse heavy;
+                    // keep it off the main thread so it never competes with playback UI.
+                    withContext(Dispatchers.IO) {
+                        safeApiCall {
+                            generator?.generateLinks(
+                                sourceTypes = LOADTYPE_INAPP,
+                                clearCache = false,
+                                isCasting = false,
+                                callback = {},
+                                subtitleCallback = {},
+                                offset = episodeIndex + 1
+                            )
+                        }
                     }
                 }
             } catch (t: Throwable) {
@@ -442,26 +448,31 @@ class PlayerGeneratorViewModel : ViewModel() {
         }
 
         currentJob = viewModelScope.launchSafe {
-            // Load more data
-            val loadingState = safeApiCall {
-                generator?.generateLinks(
-                    sourceTypes = sourceTypes,
-                    clearCache = forceClearCache,
-                    callback = { link ->
-                        if (isActive)
-                            modifyState {
-                                add(link)
-                            }
-                    },
-                    isCasting = false,
-                    offset = index,
-                    subtitleCallback = { link ->
-                        if (isActive && isValidSubtitle(link))
-                            modifyState {
-                                add(link)
-                            }
-                    })
-                Unit
+            // The provider's loadLinks does real work beyond the requests themselves
+            // (html/json parsing, unpacking, regexes). That used to run on the main
+            // dispatcher and stalled the UI while the player was opening. Resolve on IO
+            // and only hand the resulting links back through modifyState (thread safe).
+            val loadingState = withContext(Dispatchers.IO) {
+                safeApiCall {
+                    generator?.generateLinks(
+                        sourceTypes = sourceTypes,
+                        clearCache = forceClearCache,
+                        callback = { link ->
+                            if (isActive)
+                                modifyState {
+                                    add(link)
+                                }
+                        },
+                        isCasting = false,
+                        offset = index,
+                        subtitleCallback = { link ->
+                            if (isActive && isValidSubtitle(link))
+                                modifyState {
+                                    add(link)
+                                }
+                        })
+                    Unit
+                }
             }
 
             if (!isActive) {

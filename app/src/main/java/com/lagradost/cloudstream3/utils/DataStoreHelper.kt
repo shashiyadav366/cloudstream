@@ -222,6 +222,22 @@ object DataStoreHelper {
             }
         }
 
+    /**
+     * After restoring a backup, the stored source is the other device's plugin path.
+     * Resolve it to the matching plugin installed here so the selected default
+     * homepage provider stays highlighted and keeps loading after the restore.
+     */
+    fun normalizeCurrentHomeSource() {
+        val homepage = currentHomePage ?: return
+        val source = currentHomeSource ?: return
+        val api = com.lagradost.cloudstream3.APIHolder
+            .getApiFromSourceAndNameNull(homepage, source) ?: return
+        val localSource = api.sourcePlugin ?: return
+        if (localSource != source) {
+            currentHomeSource = localSource
+        }
+    }
+
     fun setAccount(account: Account, showToast : Boolean = true) {
         val homepage = currentHomePage
         selectedKeyIndex = account.keyIndex
@@ -538,6 +554,11 @@ object DataStoreHelper {
         @JsonProperty("score") @SerialName("score") override var score: Score? = null,
         /** Last time the entry was played, used to sort Continue Watching entries. */
         @Transient val updateTime: Long = 0L,
+        /**
+         * Provider data needed to resolve links without loading the provider page again.
+         * Only used by the click handler, never persisted as part of this model.
+         */
+        @Transient val episodeData: String? = null,
     ) : SearchResponse, SourcePluginAware {
         /** Plugin that produced this entry, when known. Never serialized here. */
         @Transient
@@ -654,6 +675,7 @@ object DataStoreHelper {
         isFromDownload: Boolean = false,
         updateTime: Long? = null,
         sourcePlugin: String? = null,
+        episodeData: String? = null,
     ) {
         if (parentId == null) return
         val scope = pluginProgressScope(sourcePlugin)
@@ -670,6 +692,8 @@ object DataStoreHelper {
                 // Persist the plugin only for scoped entries; legacy entries stay null
                 // so they keep resolving to the shared progress.
                 if (scope != null) sourcePlugin else null,
+                // Lets Continue Watching start playback without loading the provider page.
+                episodeData,
             )
         )
     }
@@ -820,11 +844,12 @@ object DataStoreHelper {
     ) {
         if (!isWatchHistoryEnabled()) return
 
-        // Live streams have no meaningful resume position. Store the entry exactly once so it
-        // shows up in Continue Watching while the original plugin still has the card it was
-        // saved from (HomeViewModel drops the entry once the plugin does not have it anymore).
-        // NSFW is only a content category, not a stream kind: NSFW static videos are seekable
-        // and track progress like any other video.
+        // Live streams have no meaningful resume position. Keep the entry while the original
+        // plugin still has the card it was saved from (HomeViewModel drops the entry once the
+        // plugin does not have it anymore). Refresh its timestamp on every playback update so
+        // replaying a live event moves it to the top of Continue Watching, just like static
+        // videos. NSFW is only a content category, not a stream kind: NSFW static videos are
+        // seekable and track progress like any other video.
         val isLive = when (val meta = currentEpisode) {
             is ResultEpisode -> meta.tvType.isLiveStream()
             else -> false
@@ -836,7 +861,7 @@ object DataStoreHelper {
                 is ExtractorUri -> meta.parentId
                 else -> null
             }
-            if (parentId != null && getLastWatched(parentId, sourcePlugin) == null) {
+            if (parentId != null) {
                 setLastWatched(
                     parentId,
                     episodeId = null,
@@ -844,6 +869,9 @@ object DataStoreHelper {
                     season = null,
                     isFromDownload = currentEpisode is ExtractorUri,
                     sourcePlugin = sourcePlugin,
+                    // Live events have no episode id, so the playable data is the only way to
+                    // start them again without loading the provider page.
+                    episodeData = (currentEpisode as? ResultEpisode)?.data,
                 )
             }
             return
@@ -885,6 +913,7 @@ object DataStoreHelper {
                         resumeMeta.season,
                         isFromDownload = false,
                         sourcePlugin = sourcePlugin,
+                        episodeData = resumeMeta.data,
                     )
                 }
 

@@ -13,6 +13,7 @@ import com.lagradost.cloudstream3.SearchResponseList
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.fixUrl
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safeApiCall
@@ -94,6 +95,12 @@ class APIRepository(val api: MainAPI) {
                     for (item in cache) {
                         // 10 min save
                         if (item.hash == lookingForHash && (unixTime - item.unixTime) < 60 * 10) {
+                            // A live page carries the session/player URL the provider made
+                            // for that moment. Playing it again from the cache is what makes
+                            // a live replay wait and then end in "No links found", so live
+                            // cards are always asked for again — exactly like opening a
+                            // fresh card from the provider.
+                            if (item.response.type.isLiveStream()) continue
                             found = item.response
                             break
                         }
@@ -108,7 +115,13 @@ class APIRepository(val api: MainAPI) {
                     val add = SavedLoadResponse(unixTime, response, lookingForHash)
 
                     cache.withLock {
-                        if (cache.size > CACHE_SIZE) {
+                        // Replace the entry of the same page instead of appending a
+                        // duplicate: live pages are re-fetched on every open and would
+                        // otherwise push the other cached pages out.
+                        val existing = cache.indexOfFirst { it.hash == lookingForHash }
+                        if (existing >= 0) {
+                            cache[existing] = add
+                        } else if (cache.size > CACHE_SIZE) {
                             cache[cacheIndex] = add // rolling cache
                             cacheIndex = (cacheIndex + 1) % CACHE_SIZE
                         } else {
@@ -153,7 +166,11 @@ class APIRepository(val api: MainAPI) {
         delay(delta)
     }
 
-    suspend fun getMainPage(page: Int, nameIndex: Int? = null): Resource<List<HomePageResponse?>> {
+    suspend fun getMainPage(
+        page: Int,
+        nameIndex: Int? = null,
+        skipCategory: ((String) -> Boolean)? = null
+    ): Resource<List<HomePageResponse?>> {
         return safeApiCall {
             withTimeout(getTimeout(api.getMainPageTimeoutMs)) {
                 api.lastHomepageRequest = unixTimeMS
@@ -166,9 +183,18 @@ class APIRepository(val api: MainAPI) {
                         )
                     )
                 } ?: run {
-                    if (api.sequentialMainPage) {
+                    // Hidden categories can be skipped before their request is
+                    // made, as long as the provider declares named main-page
+                    // entries. Plugins that build their homepage dynamically
+                    // have a blank entry and are filtered after loading instead.
+                    val pages = skipCategory?.let { skip ->
+                        api.mainPage.filterNot { it.name.isNotBlank() && skip(it.name) }
+                    } ?: api.mainPage
+                    if (pages.isEmpty()) {
+                        emptyList()
+                    } else if (api.sequentialMainPage) {
                         var first = true
-                        api.mainPage.map { data ->
+                        pages.map { data ->
                             if (!first) // dont want to sleep on first request
                                 delay(api.sequentialMainPageDelay)
                             first = false
@@ -180,7 +206,7 @@ class APIRepository(val api: MainAPI) {
                         }
                     } else {
                         with(CoroutineScope(coroutineContext)) {
-                            api.mainPage.map { data ->
+                            pages.map { data ->
                                 async {
                                     api.getMainPage(
                                         page,

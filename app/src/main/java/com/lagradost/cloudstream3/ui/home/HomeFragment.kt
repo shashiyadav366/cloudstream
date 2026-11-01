@@ -109,6 +109,12 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
     BindingCreator.Bind(FragmentHomeBinding::bind)
 ) {
     companion object {
+        private const val ACTION_HIDE_CATEGORY = 0
+        private const val ACTION_UNHIDE_CATEGORY = 1
+        private const val ACTION_UNHIDE_ALL = 2
+        private const val ACTION_MANAGE = 3
+        private const val ACTION_ONLY_THIS = 4
+
         // Used for configuration changed events to fix any popups that are not attached to a fragment
         val configEvent = EmptyEvent()
         var currentSpan = 1
@@ -481,10 +487,21 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             selectedApiSource: String? = null,
             callback: (MainAPI) -> Unit,
         ) {
-            val validAPIs = filterProviderByPreferredMedia().toMutableList()
-
-            validAPIs.add(0, randomApi)
-            validAPIs.add(0, noneApi)
+            val validAPIs = mutableListOf<MainAPI>().apply {
+                add(noneApi)
+                add(randomApi)
+                addAll(
+                    CustomHomeSources.all(this@selectHomepage)
+                        .mapNotNull { CustomHomeSourceApi.create(it, this@selectHomepage) }
+                )
+                addAll(
+                    filterProviderByPreferredMedia()
+                        .filterNot {
+                            HomeCategorySettings.isProviderFullyHidden(this@selectHomepage, it) ||
+                                CustomHomeSources.isBlockedProvider(it)
+                        }
+                )
+            }
             //val builder: AlertDialog.Builder = AlertDialog.Builder(this)
             //builder.setView(R.layout.home_select_mainpage)
             val builder =
@@ -918,6 +935,221 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
     var lastSavedHomepage: String? = null
 
+    private var lastHomePage: Map<String, HomeViewModel.ExpandableHomepageList>? = null
+    private var lastHomeFilterSignature: String? = null
+    private var lastHiddenSignature: String? = null
+
+    private fun currentProviderApi(): MainAPI? =
+        homeViewModel.repo?.api
+            ?: APIHolder.getApiFromSourceAndNameNull(
+                homeViewModel.apiName.value,
+                DataStoreHelper.currentHomeSource
+            )
+            ?: homeViewModel.apiName.value?.let { getApiFromNameNull(it) }
+
+    private fun currentProviderKey(): String? =
+        currentProviderApi()?.let { HomeCategorySettings.providerKey(it) }
+
+    private fun filterHomePage(
+        page: Map<String, HomeViewModel.ExpandableHomepageList>
+    ): Map<String, HomeViewModel.ExpandableHomepageList> {
+        val ctx = context ?: return page
+        val api = currentProviderApi() ?: return page
+        val providerKey = HomeCategorySettings.providerKey(api)
+        HomeCategorySettings.rememberCategories(
+            ctx,
+            providerKey,
+            page.values.map { it.list.name }
+        )
+        val hidden = HomeCategorySettings.hiddenFor(ctx, providerKey)
+        if (hidden.isEmpty()) return page
+        val hiddenNormalized = hidden
+            .mapTo(HashSet(hidden.size)) { HomeCategorySettings.normalize(it) }
+        return page.filterValues {
+            HomeCategorySettings.normalize(it.list.name) !in hiddenNormalized
+        }
+    }
+
+    private fun submitHomePage(
+        page: Map<String, HomeViewModel.ExpandableHomepageList>
+    ) {
+        lastHomePage = page
+        val filtered = filterHomePage(page)
+        val providerKey = currentProviderKey()
+        lastHomeFilterSignature = filtered.values.joinToString("\u001F") { it.list.name } +
+            "\u001E" + providerKey.orEmpty()
+        lastHiddenSignature = providerKey?.let { key ->
+            context?.let { HomeCategorySettings.hiddenFor(it, key) }
+                ?.sorted()
+                ?.joinToString("\u001F")
+        }
+        (binding?.homeMasterRecycler?.adapter as? ParentItemAdapter)?.submitList(
+            filtered.values.map {
+                it.copy(
+                    list = it.list.copy(list = it.list.list.toMutableList())
+                )
+            }
+        )
+        saveHomepageToTV(filtered)
+    }
+
+    private fun refreshHomeCategories() {
+        val page = lastHomePage ?: return
+        submitHomePage(page)
+    }
+
+    private fun showCategoryMenu(item: HomeViewModel.ExpandableHomepageList) {
+        val ctx = context ?: return
+        val providerKey = currentProviderKey() ?: return
+        val name = item.list.name
+        val hidden = HomeCategorySettings.hiddenFor(ctx, providerKey)
+        val isHidden = HomeCategorySettings.isHidden(hidden, name)
+
+        val options = mutableListOf<String>()
+        val actions = mutableListOf<Int>()
+        if (isHidden) {
+            options += getString(R.string.home_unhide_category)
+            actions += ACTION_UNHIDE_CATEGORY
+        } else {
+            options += getString(R.string.home_hide_category)
+            actions += ACTION_HIDE_CATEGORY
+            options += getString(R.string.home_only_this_category)
+            actions += ACTION_ONLY_THIS
+        }
+        if (hidden.isNotEmpty()) {
+            options += getString(R.string.home_unhide_all_categories)
+            actions += ACTION_UNHIDE_ALL
+        }
+        options += getString(R.string.home_manage_categories)
+        actions += ACTION_MANAGE
+
+        AlertDialog.Builder(ctx, R.style.AlertDialogCustom)
+            .setTitle(name)
+            .setItems(options.toTypedArray()) { _, which ->
+                when (actions.getOrNull(which)) {
+                    ACTION_HIDE_CATEGORY -> {
+                        HomeCategorySettings.setHidden(ctx, providerKey, name, true)
+                        showToast(R.string.home_category_hidden, Toast.LENGTH_SHORT)
+                        refreshHomeCategories()
+                    }
+
+                    ACTION_UNHIDE_CATEGORY -> {
+                        HomeCategorySettings.setHidden(ctx, providerKey, name, false)
+                        showToast(R.string.home_category_unhidden, Toast.LENGTH_SHORT)
+                        // The category was skipped before loading, so fetch the
+                        // provider again to bring its row back.
+                        homeViewModel.reloadHomeFromUI()
+                    }
+
+                    ACTION_ONLY_THIS -> {
+                        val normalizedName = HomeCategorySettings.normalize(name)
+                        val allCategories = mutableListOf<String>()
+                        allCategories += name
+                        allCategories += HomeCategorySettings.knownFor(ctx, providerKey)
+                        allCategories += lastHomePage?.values
+                            ?.map { it.list.name }
+                            .orEmpty()
+                        allCategories += currentProviderApi()?.mainPage
+                            ?.map { it.name }
+                            .orEmpty()
+                        val others = allCategories
+                            .filter { it.isNotBlank() }
+                            .distinctBy { HomeCategorySettings.normalize(it) }
+                            .filterNot {
+                                HomeCategorySettings.normalize(it) == normalizedName
+                            }
+                        HomeCategorySettings.setAllHidden(
+                            ctx,
+                            providerKey,
+                            others,
+                            true
+                        )
+                        HomeCategorySettings.setHidden(ctx, providerKey, name, false)
+                        showToast(
+                            getString(R.string.home_only_this_category_toast, name),
+                            Toast.LENGTH_SHORT
+                        )
+                        // Only the selected shelf must be requested from now on.
+                        homeViewModel.reloadHomeFromUI()
+                    }
+
+                    ACTION_UNHIDE_ALL -> showUnhideCategoriesDialog(providerKey)
+
+                    ACTION_MANAGE -> activity?.navigate(
+                        R.id.action_navigation_global_to_navigation_home_categories
+                    )
+                }
+            }
+            .showWithTvFocus()
+    }
+
+    /**
+     * Category menus are opened by clicking the shelf title on TV (a long D-pad
+     * press is not reliable there). Put the focus on the option list so the
+     * remote can immediately select hide/unhide.
+     */
+    private fun AlertDialog.Builder.showWithTvFocus(): AlertDialog {
+        val dialog = create()
+        if (isLayout(TV)) {
+            dialog.setOnShowListener {
+                dialog.listView?.post { dialog.listView?.requestFocus() }
+            }
+        }
+        dialog.show()
+        return dialog
+    }
+
+    private fun showUnhideCategoriesDialog(providerKey: String) {
+        val ctx = context ?: return
+        val hidden = HomeCategorySettings.hiddenFor(ctx, providerKey).sorted()
+        if (hidden.isEmpty()) return
+        val checked = BooleanArray(hidden.size)
+        AlertDialog.Builder(ctx, R.style.AlertDialogCustom)
+            .setTitle(R.string.home_unhide_all_categories)
+            .setMultiChoiceItems(hidden.toTypedArray(), checked) { _, index, isChecked ->
+                checked[index] = isChecked
+            }
+            .setPositiveButton(R.string.ok) { _, _ ->
+                val restored = hidden.filterIndexed { index, _ -> checked[index] }
+                if (restored.isNotEmpty()) {
+                    restored.forEach { category ->
+                        HomeCategorySettings.setHidden(ctx, providerKey, category, false)
+                    }
+                    // Reload so the previously skipped categories are fetched.
+                    showToast(R.string.home_categories_shown, Toast.LENGTH_SHORT)
+                    homeViewModel.reloadHomeFromUI()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .showWithTvFocus()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The category manager lives in Settings. If its rules changed, reload
+        // the provider so newly shown categories are fetched and hidden ones
+        // are skipped before their requests. Otherwise just re-apply the
+        // filter to the page already in memory.
+        val page = lastHomePage ?: return
+        val providerKey = currentProviderKey()
+        val hiddenSignature = providerKey?.let { key ->
+            context?.let { HomeCategorySettings.hiddenFor(it, key) }
+                ?.sorted()
+                ?.joinToString("\u001F")
+        }
+        if (hiddenSignature != null && hiddenSignature != lastHiddenSignature) {
+            lastHiddenSignature = hiddenSignature
+            homeViewModel.reloadHomeFromUI()
+            return
+        }
+        val filtered = filterHomePage(page)
+        val signature = filtered.values.joinToString("\u001F") { it.list.name } +
+            "\u001E" + providerKey.orEmpty()
+        if (signature != lastHomeFilterSignature) {
+            submitHomePage(page)
+        }
+    }
+
     fun saveHomepageToTV(page: Map<String, HomeViewModel.ExpandableHomepageList>) {
         // No need to update for phone
         if (isLayout(PHONE)) {
@@ -962,7 +1194,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             homeApiFab.setOnClickListener(apiChangeClickListener)
             homeApiFab.setOnLongClickListener {
                 if (currentApiName == noneApi.name) return@setOnLongClickListener false
-                homeViewModel.loadAndCancel(currentApiName, forceReload = true, fromUI = true)
+                homeViewModel.reloadHomeFromUI()
                 showToast(R.string.action_reload, Toast.LENGTH_SHORT)
                 true
             }
@@ -973,18 +1205,16 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
             homeMasterAdapter = HomeParentItemAdapterPreview(
                 homeViewModel, accountViewModel
-            )
+            ).apply {
+                categoryLongClickCallback = { showCategoryMenu(it) }
+            }
             homeMasterRecycler.setRecycledViewPool(ParentItemAdapter.sharedPool)
             homeMasterRecycler.adapter = homeMasterAdapter
 
             homeApiFab.isVisible = isLayout(PHONE)
 
             homePreviewReloadProvider.setOnClickListener {
-                homeViewModel.loadAndCancel(
-                    homeViewModel.apiName.value ?: noneApi.name,
-                    forceReload = true,
-                    fromUI = true
-                )
+                homeViewModel.reloadHomeFromUI()
                 showToast(R.string.action_reload, Toast.LENGTH_SHORT)
             }
 
@@ -1113,6 +1343,14 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 homeChangeApi.text = displayApiName
                 homePreviewReloadProvider.isGone = (apiName == noneApi.name)
                 homePreviewSearchButton.isGone = (apiName == noneApi.name)
+                if (isLayout(TV or EMULATOR)) {
+                    // This row carries the provider selector, reload and search. It is
+                    // normally positioned by the scroll mirror, which only runs once the
+                    // header has been laid out and scrolled. A provider without a hero
+                    // preview - a custom plugin merging categories has none - never gets
+                    // that far, so show the row as soon as a provider is selected.
+                    homeApiHolder.isVisible = true
+                }
             }
         }
 
@@ -1127,13 +1365,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 when (data) {
                     is Resource.Success -> {
                         val d = data.value
-                        (homeMasterRecycler.adapter as? ParentItemAdapter)?.submitList(d.values.map {
-                            it.copy(
-                                list = it.list.copy(list = it.list.list.toMutableList())
-                            )
-                        })
-
-                        saveHomepageToTV(d)
+                        submitHomePage(d)
 
                         homeLoading.isVisible = false
                         homeLoadingError.isVisible = false
@@ -1198,6 +1430,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                             activity.navigate(R.id.navigation_downloads)
                         }
 
+                        lastHomePage = null
                         (homeMasterRecycler.adapter as? ParentItemAdapter)?.apply {
                             submitList(null)
                             clearState()
@@ -1209,6 +1442,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                         homeLoading.isVisible = true
                         homeLoadingError.isVisible = false
                         homeMasterRecycler.isInvisible = true
+                        lastHomePage = null
                         (homeMasterRecycler.adapter as? ParentItemAdapter)?.apply {
                             submitList(null)
                             clearState()

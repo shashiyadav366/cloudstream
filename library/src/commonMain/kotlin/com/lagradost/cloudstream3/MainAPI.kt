@@ -171,8 +171,25 @@ object APIHolder {
      */
     fun getApiFromSourceAndNameNull(apiName: String?, sourcePlugin: String?): MainAPI? {
         if (apiName == null || sourcePlugin == null) return null
+        fun String.portablePluginId(): String {
+            val marker = "Extensions/"
+            val markerIndex = lastIndexOf(marker)
+            return if (markerIndex >= 0) {
+                substring(markerIndex + marker.length)
+            } else {
+                substringAfterLast('/').substringAfterLast('\\')
+            }
+        }
+        val portableSource = sourcePlugin.portablePluginId()
         return allProviders.withLock {
             allProviders.firstOrNull { it.sourcePlugin == sourcePlugin && it.name == apiName }
+                // Plugin paths differ between installs/devices, but the path relative
+                // to `Extensions/` is stable. This keeps a restored homepage provider
+                // selection working without hardcoding this device's path.
+                ?: allProviders.firstOrNull {
+                    it.name == apiName &&
+                        it.sourcePlugin?.portablePluginId() == portableSource
+                }
         }
     }
 

@@ -22,6 +22,7 @@ import com.lagradost.cloudstream3.utils.M3u8Helper2
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
@@ -30,6 +31,16 @@ import kotlin.math.log2
 
 const val MAX_LOD = 6
 const val MIN_LOD = 3
+
+/**
+ * Delay before the seek bar previews start downloading.
+ *
+ * Both generators fetch real media: the m3u8 one re-downloads the playlist and whole
+ * segments, the mp4 one opens the file remotely. Starting that the instant the player
+ * opens competed with the first playback segments for bandwidth and delayed the first
+ * frame, so give playback a head start first.
+ */
+const val PREVIEW_START_DELAY_MS = 4_000L
 
 data class ImageParams(
     val width: Int,
@@ -320,6 +331,7 @@ private class M3u8PreviewGenerator(override var params: ImageParams) : IPreviewG
         currentJob?.cancel()
         currentJob = ioSafe {
             withContext(Dispatchers.IO) {
+                delay(PREVIEW_START_DELAY_MS)
                 Log.i(TAG, "Loading with url = $url headers = $headers")
                 //tmpFile =
                 //    File.createTempFile("video", ".ts", context.cacheDir).apply {
@@ -481,6 +493,7 @@ private class Mp4PreviewGenerator(override var params: ImageParams) : IPreviewGe
     fun load(url: String, headers: Map<String, String>) {
         currentJob?.cancel()
         currentJob = ioSafe {
+            delay(PREVIEW_START_DELAY_MS)
             Log.i(TAG, "Loading with url = $url headers = $headers")
             clear(true)
             retriever.setDataSource(url, headers)

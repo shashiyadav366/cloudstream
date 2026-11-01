@@ -116,6 +116,7 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper.removeSubscribedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setDub
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setFavoritesData
+import com.lagradost.cloudstream3.utils.DataStoreHelper.setLastWatched
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultEpisode
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultSeason
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultWatchState
@@ -1377,6 +1378,9 @@ class ResultViewModel2 : ViewModel() {
 
                 options.add(txt(R.string.episode_action_play_in_app) to ACTION_PLAY_EPISODE_IN_PLAYER)
                 options.add(
+                    txt(R.string.episode_action_add_to_continue_watching) to ACTION_ADD_TO_CONTINUE_WATCHING
+                )
+                options.add(
                     txt(R.string.episode_action_play_incognito) to ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
                 )
                 options.addAll(
@@ -1551,6 +1555,38 @@ class ResultViewModel2 : ViewModel() {
 
             ACTION_CHROME_CAST_EPISODE -> {
                 startChromecast(activity, click.data)
+            }
+
+            ACTION_ADD_TO_CONTINUE_WATCHING -> {
+                val sourcePlugin = click.data.sourcePlugin ?: currentSourcePlugin
+                // Opening a card through the small popup does not cache its header, so
+                // make sure Continue Watching has everything it needs to show the card.
+                currentResponse?.let { response ->
+                    setKey(
+                        DOWNLOAD_HEADER_CACHE,
+                        DataStoreHelper.headerCacheKey(click.data.parentId, sourcePlugin),
+                        DownloadObjects.DownloadHeaderCached(
+                            apiName = response.apiName,
+                            url = response.url,
+                            type = response.type,
+                            name = response.name,
+                            poster = response.posterUrl,
+                            id = click.data.parentId,
+                            cacheTime = System.currentTimeMillis(),
+                        )
+                    )
+                }
+                DataStoreHelper.setLastWatched(
+                    parentId = click.data.parentId,
+                    episodeId = click.data.id,
+                    episode = click.data.episode,
+                    season = click.data.season,
+                    isFromDownload = false,
+                    sourcePlugin = sourcePlugin,
+                    // Lets this card start playback without loading the provider page again.
+                    episodeData = click.data.data,
+                )
+                showToast(R.string.added_to_continue_watching, Toast.LENGTH_SHORT)
             }
 
             ACTION_PLAY_EPISODE_IN_PLAYER,
@@ -2596,6 +2632,8 @@ class ResultViewModel2 : ViewModel() {
         override var contentRating: String? = null,
         override var uniqueUrl: String = url,
         val id: Int?,
+        /** Plugin that produced this card, used when it was not loaded by the home provider. */
+        val sourcePlugin: String? = null,
     ) : LoadResponse
 
     fun loadSmall(searchResponse: SearchResponse) = ioSafe {

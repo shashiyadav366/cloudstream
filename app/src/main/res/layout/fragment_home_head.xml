@@ -168,6 +168,22 @@
         android:orientation="horizontal"
         android:paddingHorizontal="0dp">
 
+        <!-- Refresh current provider, shown when no hero preview is available -->
+        <ImageView
+            android:id="@+id/alternate_home_head_reload_provider"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_gravity="center"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="@string/reload_provider"
+            android:focusable="true"
+            android:nextFocusLeft="@id/home_search"
+            android:nextFocusRight="@id/alternate_home_head_profile_padding"
+            android:padding="13dp"
+            android:src="@drawable/ic_refresh"
+            app:tint="?attr/white" />
+
         <LinearLayout
             android:id="@+id/alternate_home_head_profile_padding"
             android:layout_width="50dp"
@@ -176,7 +192,7 @@
             android:focusable="true"
             android:foreground="@drawable/rounded_select_ripple"
             android:gravity="center"
-            android:nextFocusLeft="@id/home_search"
+            android:nextFocusLeft="@id/alternate_home_head_reload_provider"
             android:orientation="horizontal">
 
             <androidx.cardview.widget.CardView
@@ -208,6 +224,7 @@
         android:id="@+id/home_watch_holder"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/home_section_spacing"
         android:orientation="vertical"
         android:visibility="gone"
         tools:visibility="visible">
@@ -243,6 +260,8 @@
         android:id="@+id/home_cricket_holder"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/home_section_spacing"
+        android:background="?attr/colorPrimary"
         android:orientation="vertical"
         android:visibility="gone"
         tools:visibility="visible">
@@ -256,7 +275,8 @@
             android:background="?android:attr/selectableItemBackground"
             android:contentDescription="@string/home_more_info"
             android:padding="12dp"
-            android:text="@string/cricket_live"
+            android:text="@string/live_cricket_events"
+            android:textColor="?attr/white"
             app:drawableRightCompat="@drawable/ic_baseline_arrow_forward_24"
             app:drawableTint="?attr/white" />
 
@@ -278,6 +298,7 @@
         android:id="@+id/home_bookmarked_holder"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/home_section_spacing"
         android:orientation="vertical"
         android:visibility="gone"
         tools:visibility="visible">

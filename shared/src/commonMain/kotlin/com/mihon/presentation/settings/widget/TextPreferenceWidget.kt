@@ -27,7 +27,9 @@ fun TextPreferenceWidget(
     icon: Painter? = null,
     iconTint: Color = MaterialTheme.colorScheme.onBackground,
     widget: @Composable (() -> Unit)? = null,
+    compactTitle: Boolean = false,
     onPreferenceClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
     BasePreferenceWidget(
         modifier = modifier,
@@ -59,7 +61,9 @@ fun TextPreferenceWidget(
             null
         },
         onClick = onPreferenceClick,
+        onLongClick = onLongClick,
         widget = widget,
+        compactTitle = compactTitle,
     )
 }
 

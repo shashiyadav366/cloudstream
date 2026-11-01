@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" /> <!-- Used for player vertical slide -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" /> <!-- Used for app update -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> <!-- Used for app notifications on Android 13+ -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" /> <!-- Used for match start notifications -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" /> <!-- Exact match start alarms on Android 13+ -->
     <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" /> <!-- Used for Android TV watch next -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" /> <!-- Used for updates without prompt -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" /> <!-- Used for update service -->
@@ -261,6 +263,10 @@
 
         <receiver
             android:name=".receivers.PackageInstallerStatusReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".services.LiveEventNotificationAlarmReceiver"
             android:exported="false" />
 
         <service

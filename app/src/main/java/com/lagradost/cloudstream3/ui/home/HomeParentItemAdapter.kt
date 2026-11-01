@@ -21,7 +21,6 @@ import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.search.SearchClickCallback
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
-import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRecyclerScrollable
@@ -50,6 +49,9 @@ open class ParentItemAdapter(
         val sharedPool =
             newSharedPool { setMaxRecycledViews(CONTENT, 4) }
     }
+
+    /** Long-press on a category title; used by HomeFragment to hide the shelf. */
+    var categoryLongClickCallback: ((HomeViewModel.ExpandableHomepageList) -> Unit)? = null
 
     data class ParentItemHolder(val binding: ViewBinding) : ViewHolderState<Bundle>(binding) {
         override fun save(): Bundle = Bundle().apply {
@@ -130,6 +132,27 @@ open class ParentItemAdapter(
                 nextRight = endFocus,
             )
             homeChildMoreInfo.text = info.name
+            homeChildMoreInfo.setOnLongClickListener {
+                val callback = categoryLongClickCallback ?: return@setOnLongClickListener false
+                callback.invoke(item)
+                true
+            }
+
+            if (isLayout(TV)) {
+                // A D-pad long press is unreliable on TV, so the title itself is a
+                // focusable action that opens the category menu with the OK button.
+                homeChildMoreInfo.isFocusable = true
+                homeChildMoreInfo.isClickable = true
+                homeChildMoreInfo.setBackgroundResource(R.drawable.outline_drawable_forced)
+                homeChildMoreInfo.setOnClickListener {
+                    categoryLongClickCallback?.invoke(item)
+                }
+            } else {
+                homeChildMoreInfo.isFocusable = false
+                homeChildMoreInfo.setOnClickListener {
+                    moreInfoClickCallback.invoke(item)
+                }
+            }
 
             homeChildRecyclerview.addOnScrollListener(object :
                 RecyclerView.OnScrollListener() {
@@ -163,11 +186,6 @@ open class ParentItemAdapter(
             })
 
             //(recyclerView.adapter as HomeChildItemAdapter).notifyDataSetChanged()
-            if (isLayout(PHONE or EMULATOR)) {
-                homeChildMoreInfo.setOnClickListener {
-                    moreInfoClickCallback.invoke(item)
-                }
-            }
         }
     }
 

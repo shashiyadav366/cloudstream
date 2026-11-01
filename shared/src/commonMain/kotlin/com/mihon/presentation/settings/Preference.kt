@@ -29,7 +29,9 @@ sealed class Preference {
             override val enabled: Boolean = true,
             val widget: @Composable (() -> Unit)? = null,
             val onClick: (() -> Unit)? = null,
-            override val icon: Painter? = null
+            val onLongClick: (() -> Unit)? = null,
+            override val icon: Painter? = null,
+            val compactTitle: Boolean = false,
         ) : PreferenceItem<String, Unit>() {
             override val onValueChanged: suspend (value: String) -> Unit = {}
         }
@@ -170,6 +172,15 @@ sealed class Preference {
         override val enabled: Boolean = true,
 
         val preferenceItems: List<PreferenceItem<out Any?, out Any?>>,
+        val subtitle: String? = null,
+        val titleBold: Boolean = false,
+        val titlePrimary: Boolean = false,
+        /** Space below the group header, in dp. Lower it to pull the first item closer. */
+        val headerBottomPaddingDp: Int = 8,
+        val spacingAfterDp: Int = 12,
+        val showDividerAfter: Boolean = false,
+        /** Optional control rendered at the end of the group header row. */
+        val headerWidget: (@Composable () -> Unit)? = null,
     ) : Preference()
 }
 

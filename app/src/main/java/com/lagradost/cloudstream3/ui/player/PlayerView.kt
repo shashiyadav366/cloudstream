@@ -407,6 +407,10 @@ class PlayerView @JvmOverloads constructor(
                     settingsManager.getInt(context.getString(R.string.video_buffer_disk_key), 0) * 1024L * 1024L
                 cs3.videoBufferMs =
                     settingsManager.getInt(context.getString(R.string.video_buffer_length_key), 0) * 1000L
+
+                // Build the Cronet engine and the optional disk cache in the background now,
+                // instead of synchronously on the main thread when the first frame is requested.
+                cs3.warmUp(ctx)
             } catch (e: Exception) {
                 logError(e)
             }

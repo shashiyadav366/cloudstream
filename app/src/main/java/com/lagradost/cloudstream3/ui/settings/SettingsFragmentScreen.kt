@@ -145,6 +145,16 @@ object SettingsFragmentScreen : Screen {
             )
         ),
         SettingsNavigation(
+            title = R.string.category_customization,
+            navigation = R.id.action_navigation_global_to_navigation_settings_customization,
+            screen = SettingsCustomizationScreen,
+            icon = R.drawable.ic_baseline_tune_24,
+            subtitle = persistentListOf(
+                R.string.home_categories_title,
+                R.string.custom_home_sources_title
+            )
+        ),
+        SettingsNavigation(
             title = R.string.category_updates,
             navigation = R.id.action_navigation_global_to_navigation_settings_updates,
             screen = SettingsUpdatesScreen,
