@@ -469,7 +469,7 @@ class SubtitlesFragment : BaseDialogFragment<SubtitleSettingsBinding>(
                         .setDialogId(id)
                         .setShowAlphaSlider(true)
                         .setColor(getColor(id))
-                        .show(it)
+                        .showSafe(it)
                 }
             }
 

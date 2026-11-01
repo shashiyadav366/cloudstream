@@ -226,6 +226,14 @@ class PlayerActivity : AppCompatActivity() {
             currentInstance = null
         }
 
-        super.onDestroy()
+        try {
+            super.onDestroy()
+        } catch (e: IllegalArgumentException) {
+            // A DialogFragment can outlive its dialog window (for example when the PiP
+            // window is closed while a dialog is open). DialogFragment.onDestroyView then
+            // dismisses a view that is no longer attached and throws. The activity is
+            // already being destroyed, so there is nothing left to clean up safely.
+            Log.e("PlayerActivity", "Ignored detached dialog during activity destroy", e)
+        }
     }
 }

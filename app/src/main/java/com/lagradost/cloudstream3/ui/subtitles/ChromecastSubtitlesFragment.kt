@@ -194,7 +194,7 @@ class ChromecastSubtitlesFragment : BaseFragment<ChromecastSubtitleSettingsBindi
                         .setDialogId(id)
                         .setShowAlphaSlider(true)
                         .setColor(getColor(id))
-                        .show(it)
+                        .showSafe(it)
                 }
             }
 

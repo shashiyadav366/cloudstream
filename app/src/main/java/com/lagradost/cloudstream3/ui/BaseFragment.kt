@@ -229,10 +229,22 @@ abstract class BaseDialogFragment<T : ViewBinding>(
         view?.let { fixLayout(it) }
     }
 
-    /** Cleans up the binding reference when the view is destroyed to avoid memory leaks. */
+    /**
+     * Cleans up the binding reference when the view is destroyed to avoid memory leaks.
+     *
+     * The dialog window can already be detached when the host activity is destroyed
+     * (for example while the player is in PiP or after the window was removed by the
+     * system). Dismissing it then throws "not attached to window manager" and would
+     * crash the app, so that specific failure is ignored.
+     */
     override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
+        try {
+            super.onDestroyView()
+        } catch (e: IllegalArgumentException) {
+            logError(e)
+        } finally {
+            _binding = null
+        }
     }
 }
 
@@ -258,10 +270,15 @@ abstract class BaseBottomSheetDialogFragment<T : ViewBinding>(
         view?.let { fixLayout(it) }
     }
 
-    /** Cleans up the binding reference when the view is destroyed to avoid memory leaks. */
+    /** @see BaseDialogFragment.onDestroyView */
     override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
+        try {
+            super.onDestroyView()
+        } catch (e: IllegalArgumentException) {
+            logError(e)
+        } finally {
+            _binding = null
+        }
     }
 }
 

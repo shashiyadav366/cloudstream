@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLandscape
@@ -97,6 +98,15 @@ abstract class BaseDialogComposeFragment : DialogFragment(), Screen {
 
     override fun getTheme(): Int {
         return R.style.DialogFullscreenPlayer
+    }
+
+    /** See [com.lagradost.cloudstream3.ui.BaseDialogFragment.onDestroyView] for why this is guarded. */
+    override fun onDestroyView() {
+        try {
+            super.onDestroyView()
+        } catch (e: IllegalArgumentException) {
+            logError(e)
+        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
