@@ -23,6 +23,7 @@ import com.lagradost.cloudstream3.network.initClient
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.services.BackupWorkManager
 import com.lagradost.cloudstream3.ui.BasePreferenceFragmentCompat
+import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.getPref
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.hideOn
@@ -119,7 +120,10 @@ class SettingsUpdates : BasePreferenceFragmentCompat() {
         }
 
         getPref(R.string.redo_setup_key)?.setOnPreferenceClickListener {
-            findNavController().navigate(R.id.navigation_setup_language)
+            findNavController().navigate(
+                R.id.navigation_setup_extensions,
+                SetupFragmentExtensions.newInstance(true)
+            )
             return@setOnPreferenceClickListener true
         }
 

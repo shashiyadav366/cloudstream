@@ -13,6 +13,8 @@ import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.BaseFragment
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 
+const val HAS_DONE_SETUP_KEY = "HAS_DONE_SETUP"
+
 class SetupFragmentLayout : BaseFragment<FragmentSetupLayoutBinding>(
     BaseFragment.BindingCreator.Inflate(FragmentSetupLayoutBinding::inflate)
 ) {

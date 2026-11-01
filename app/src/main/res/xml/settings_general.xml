@@ -2,11 +2,6 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <Preference
-        android:icon="@drawable/ic_baseline_language_24"
-        android:key="@string/locale_key"
-        android:title="@string/app_language" />
-
-    <Preference
         android:icon="@drawable/ic_baseline_warning_24"
         android:key="@string/legal_notice_key"
         android:title="@string/legal_notice" />

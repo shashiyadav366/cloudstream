@@ -41,6 +41,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.services.BackupWorkManager
 import com.lagradost.cloudstream3.plugins.PluginManager
+import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
 import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream3.utils.BackupUtils.restoreFromPath
 import com.lagradost.cloudstream3.utils.BackupUtils.restorePrompt
@@ -459,7 +460,10 @@ object SettingsUpdatesScreen : SearchableSettings {
                         title = stringResource(R.string.redo_setup_process),
                         icon = painterResource(R.drawable.construction_24px),
                         onClick = {
-                            activity?.navigate(R.id.navigation_setup_language)
+                            activity?.navigate(
+                                R.id.navigation_setup_extensions,
+                                SetupFragmentExtensions.newInstance(true)
+                            )
                         }
                     ),
                 )

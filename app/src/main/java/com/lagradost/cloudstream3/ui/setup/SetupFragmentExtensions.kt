@@ -77,7 +77,7 @@ class SetupFragmentExtensions : BaseFragment<FragmentSetupExtensionsBinding>(
                 if (!isSetup) {
                     nextBtt.setText(R.string.setup_done)
                 }
-                prevBtt.isVisible = isSetup
+                prevBtt.isVisible = false
 
                 nextBtt.setOnClickListener {
                     // Continue setup
@@ -92,10 +92,6 @@ class SetupFragmentExtensions : BaseFragment<FragmentSetupExtensionsBinding>(
                         }
                     else
                         findNavController().navigate(R.id.navigation_home)
-                }
-
-                prevBtt.setOnClickListener {
-                    findNavController().navigate(R.id.navigation_setup_language)
                 }
             }
         }

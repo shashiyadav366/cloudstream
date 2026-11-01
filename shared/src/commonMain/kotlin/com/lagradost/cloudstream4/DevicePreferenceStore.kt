@@ -203,7 +203,6 @@ class PlayerPreferences(
 }
 
 class GeneralPreferences(preferences: PreferenceStore) {
-    val locale = preferences.getString("app_locale", "")
     val bananas = preferences.getInt("benene_count", 0)
     val parallelDownloads = preferences.getInt("download_parallel_key", 3)
     val concurrentConnections = preferences.getInt("download_concurrent_key", 3)

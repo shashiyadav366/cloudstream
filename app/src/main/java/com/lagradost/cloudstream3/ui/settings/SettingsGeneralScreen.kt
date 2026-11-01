@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.AllLanguagesName
 import com.lagradost.cloudstream3.CloudStreamApp
-import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
@@ -175,18 +174,6 @@ object SettingsGeneralScreen : SearchableSettings {
 
         return persistentListOf(
             Preference.PreferenceGroup(title = stringResource(R.string.extension_language), preferenceItems = persistentListOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = settings.general.locale,
-                    entries = appLanguages.associate { (name, code) -> (code to (name to code).nameNextToFlagEmoji()) },
-                    title = stringResource(R.string.app_language),
-                    icon = painterResource(R.drawable.language_korean_latin_24px),
-                    onValueChanged = { value ->
-                        settings.general.locale.set(value)
-                        activity?.recreate()
-                        return@ListPreference false
-                    },
-                    subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
-                ),
                 Preference.PreferenceItem.MultiSelectListPreference(
                     title = stringResource(R.string.provider_lang_settings),
                     icon = painterResource(R.drawable.plugin_lang),

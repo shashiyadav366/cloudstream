@@ -60,7 +60,6 @@ import com.lagradost.cloudstream3.utils.UIHelper.showInputMethod
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.UiText
 import java.lang.ref.WeakReference
-import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import org.schabi.newpipe.extractor.NewPipe
@@ -208,47 +207,11 @@ object CommonActivity {
         }
     }
 
-    /**
-     * Set locale
-     * @param languageTag shall a IETF BCP 47 conformant tag.
-     * Check [com.lagradost.cloudstream3.utils.SubtitleHelper].
-     *
-     * See locales on:
-     * https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/availableLocales.json
-     * https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
-     * https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r2/core/res/res/values/locale_config.xml
-     * https://iso639-3.sil.org/code_tables/639/data/all
-     */
-    fun setLocale(context: Context?, languageTag: String?) {
-        if (context == null || languageTag == null) return
-        val locale = Locale.forLanguageTag(languageTag)
-        val resources: Resources = context.resources
-        val config = resources.configuration
-        Locale.setDefault(locale)
-        config.setLocale(locale)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-            context.createConfigurationContext(config)
-
-        @Suppress("DEPRECATION")
-        resources.updateConfiguration(
-            config,
-            resources.displayMetrics
-        ) // FIXME this should be replaced
-    }
-
-    fun Context.updateLocale() {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
-        val localeCode = settingsManager.getString(getString(R.string.locale_key), null)
-        setLocale(this, localeCode)
-    }
-
     fun init(act: Activity) {
         setActivityInstance(act)
         ioSafe { Torrent.deleteAllFiles() }
         val componentActivity = activity as? ComponentActivity ?: return
 
-        componentActivity.updateLocale()
         componentActivity.updateTv()
         AccountManager.initMainAPI()
         NewPipe.init(DownloaderTestImpl.getInstance())

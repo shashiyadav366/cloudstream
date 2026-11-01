@@ -1,6 +1,5 @@
 package com.lagradost.cloudstream3.ui.settings
 
-import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -11,7 +10,6 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.edit
-import androidx.core.os.ConfigurationCompat
 import androidx.fragment.app.Fragment
 import androidx.preference.PreferenceManager
 import com.fasterxml.jackson.annotation.JsonAlias
@@ -20,7 +18,6 @@ import com.lagradost.cloudstream3.APIHolder.allProviders
 import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
-import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.MainActivity
@@ -60,91 +57,6 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNames
-import java.util.Locale
-
-// Change local language settings in the app.
-fun getCurrentLocale(context: Context): String {
-    val conf = context.resources.configuration
-    return ConfigurationCompat.getLocales(conf).get(0)?.toLanguageTag() ?: "en"
-}
-
-/**
- * List of app supported languages.
- * Language code shall be a IETF BCP 47 conformant tag
- *
- * See locales on:
- * https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/availableLocales.json
- * https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
- * https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r2/core/res/res/values/locale_config.xml
- * https://iso639-3.sil.org/code_tables/639/data/all
-*/
-val appLanguages = arrayListOf(
-    /* begin language list */
-    Pair("Afrikaans", "af"),
-    Pair("Azərbaycan dili", "az"),
-    Pair("Bahasa Indonesia", "in"),
-    Pair("Bahasa Melayu", "ms"),
-    Pair("català", "ca"),
-    Pair("Deutsch", "de"),
-    Pair("English", "en"),
-    Pair("Español", "es"),
-    Pair("Esperanto", "eo"),
-    Pair("Français", "fr"),
-    Pair("Galego", "gl"),
-    Pair("hrvatski", "hr"),
-    Pair("Italiano", "it"),
-    Pair("Latviešu valoda", "lv"),
-    Pair("Lietuvių kalba", "lt"),
-    Pair("Magyar", "hu"),
-    Pair("Malti", "mt"),
-    Pair("mmmm... monke", "qt"),
-    Pair("Nederlands", "nl"),
-    Pair("Norsk bokmål", "no"),
-    Pair("Norsk nynorsk", "nn"),
-    Pair("Polski", "pl"),
-    Pair("Português", "pt"),
-    Pair("Português (Brasil)", "pt-BR"),
-    Pair("Română", "ro"),
-    Pair("Shqip мова", "sq"),
-    Pair("Slovenčina", "sk"),
-    Pair("Soomaaliga", "so"),
-    Pair("Svenska", "sv"),
-    Pair("Tagalog", "tl"),
-    Pair("Tiếng Việt", "vi"),
-    Pair("Türkçe", "tr"),
-    Pair("Wikang Filipino", "fil"),
-    Pair("Čeština", "cs"),
-    Pair("Ελληνικά", "el"),
-    Pair("беларуская мова", "be"),
-    Pair("български", "bg"),
-    Pair("македонски", "mk"),
-    Pair("русский", "ru"),
-    Pair("українська", "uk"),
-    Pair("עברית", "iw"),
-    Pair("اردو", "ur"),
-    Pair("العربية", "ar"),
-    Pair("اللهجة النجدية", "ars"),
-    Pair("عربي شامي", "apc"),
-    Pair("فارسی", "fa"),
-    Pair("کوردیی ناوەندی", "ckb"),
-    Pair("नेपाली", "ne"),
-    Pair("हिन्दी", "hi"),
-    Pair("অসমীয়া", "as"),
-    Pair("বাংলা", "bn"),
-    Pair("ଓଡ଼ିଆ", "or"),
-    Pair("தமிழ்", "ta"),
-    Pair("ಕನ್ನಡ", "kn"),
-    Pair("മലയാളം", "ml"),
-    Pair("ພາສາລາວ", "lo"),
-    Pair("ဗမာစာ", "my"),
-    Pair("ትግርኛ", "ti"),
-    Pair("አማርኛ", "am"),
-    Pair("中文", "zh"),
-    Pair("日本語 (にほんご)", "ja"),
-    Pair("正體中文(臺灣)", "zh-TW"),
-    Pair("한국어", "ko"),
-/* end language list */
-).sortedBy { it.first.lowercase(Locale.ROOT) } // ye, we go alphabetical, so ppl don't put their lang on top
 
 fun Pair<String, String>.nameNextToFlagEmoji(): String {
     // fallback to [A][A] -> [?] question mak flag
@@ -284,29 +196,6 @@ class SettingsGeneral : BasePreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.settings_general, rootKey)
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(requireContext())
 
-
-        getPref(R.string.locale_key)?.setOnPreferenceClickListener { pref ->
-            val current = getCurrentLocale(pref.context)
-            val languageTagsIETF = appLanguages.map { it.second }
-            val languageNames = appLanguages.map { it.nameNextToFlagEmoji() }
-            val currentIndex = languageTagsIETF.indexOf(current)
-
-            activity?.showDialog(
-                languageNames, currentIndex, getString(R.string.app_language), true, { }
-            ) { selectedLangIndex ->
-                try {
-                    val langTagIETF = languageTagsIETF[selectedLangIndex]
-                    CommonActivity.setLocale(activity, langTagIETF)
-                    settingsManager.edit {
-                        putString(getString(R.string.locale_key), langTagIETF)
-                    }
-                    activity?.recreate()
-                } catch (e: Exception) {
-                    logError(e)
-                }
-            }
-            return@setOnPreferenceClickListener true
-        }
 
         getPref(R.string.battery_optimisation_key)?.hideOn(TV or EMULATOR)?.setOnPreferenceClickListener {
             val ctx = context ?: return@setOnPreferenceClickListener false
