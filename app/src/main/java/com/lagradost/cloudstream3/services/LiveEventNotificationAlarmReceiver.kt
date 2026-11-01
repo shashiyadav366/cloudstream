@@ -28,11 +28,13 @@ class LiveEventNotificationAlarmReceiver : BroadcastReceiver() {
                 )
                 LiveEventNotifier.cancelScheduledFallback(
                     context.applicationContext,
-                    event.key
+                    event.key,
+                    event.stage
                 )
                 LiveEventNotifier.clearScheduledEntry(
                     context.applicationContext,
-                    event.key
+                    event.key,
+                    event.stage
                 )
             } catch (t: Throwable) {
                 logError(t)

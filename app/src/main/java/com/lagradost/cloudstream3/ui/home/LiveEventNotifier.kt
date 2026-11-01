@@ -45,6 +45,9 @@ import kotlin.math.roundToInt
 
 const val LIVE_CRICKET_EVENTS_PREF_KEY = "live_cricket_events_key"
 
+private const val LIVE_EVENT_STAGE_START = "start"
+private const val LIVE_EVENT_STAGE_LIVE = "live"
+
 internal data class LiveEventNotification(
     val key: String,
     val name: String,
@@ -52,12 +55,15 @@ internal data class LiveEventNotification(
     val apiName: String,
     val posterUrl: String?,
     val posterHeaders: Map<String, String>? = null,
+    /** "start" for the kick-off reminder, "live" for the follow-up reminder. */
+    val stage: String = LIVE_EVENT_STAGE_START,
 )
 
 /**
- * Detects live cricket cards, schedules their start-time notifications, and shows
- * them. Exact alarms wake the device at the match time even when the app is closed;
- * WorkManager is kept as a fallback if an exact alarm cannot be scheduled.
+ * Detects live cricket cards, schedules their start-time notifications plus a
+ * follow-up "it's live, watch now" reminder, and shows them. Exact alarms wake
+ * the device at the match time even when the app is closed; WorkManager is kept
+ * as a fallback if an exact alarm cannot be scheduled.
  */
 object LiveEventNotifier {
     private const val WORK_TAG = "live_cricket_event_work"
@@ -67,15 +73,22 @@ object LiveEventNotifier {
     private const val WORK_KEY_EVENT_API_NAME = "live_event_api_name"
     private const val WORK_KEY_EVENT_POSTER = "live_event_poster"
     private const val WORK_KEY_EVENT_POSTER_HEADERS = "live_event_poster_headers"
+    private const val WORK_KEY_EVENT_STAGE = "live_event_stage"
     private const val TAG = "LiveEventNotifier"
 
     private const val CHANNEL_ID = "cloudstream3.live_events"
     private const val CHANNEL_NAME = "Live Cricket Events"
     private const val CHANNEL_DESCRIPTION =
-        "Notifications when a live cricket event starts"
+        "Notifications when a live cricket event starts and a reminder shortly after"
     private const val SHOWN_KEYS = "live_cricket_shown_keys"
     private const val SCHEDULED_KEYS = "live_cricket_scheduled_keys"
+    private const val FOLLOW_UP_KEYS = "live_cricket_followup_keys"
     private const val FALLBACK_DELAY_MS = 5 * 60 * 1000L
+
+    // A second "it's live, watch now" reminder is posted this long after the
+    // advertised start time, so the kick-off notification is not the only chance
+    // the user gets to notice the match.
+    private const val FOLLOW_UP_DELAY_MS = 10 * 60 * 1000L
 
     // The alarm receiver and the worker both have a short execution window, so the
     // poster is an optional bonus: once this timeout passes the notification is
@@ -125,7 +138,8 @@ object LiveEventNotifier {
         if (!isEnabled(context)) return
 
         val now = System.currentTimeMillis()
-        val scheduled = readScheduled(context)
+        val scheduled = readScheduled(context, SCHEDULED_KEYS)
+        val followUps = readScheduled(context, FOLLOW_UP_KEYS)
         val currentKeys = mutableSetOf<String>()
         val scheduledSlots = mutableSetOf<String>()
 
@@ -133,53 +147,92 @@ object LiveEventNotifier {
             val startTime = parseStartTime(event)
             val key = keyFor(event, startTime)
 
-            // A match can come from both PlayFy and Cricify. Keep one scheduled
-            // notification per event instead of notifying twice.
-            if (startTime == null || startTime <= now + 5_000L) {
+            if (startTime == null) {
                 currentKeys += key
                 return@forEach
             }
+
+            // A match can come from both PlayFy and Cricify. Keep one scheduled
+            // notification per event instead of notifying twice.
             val eventSlot = "${event.name.trim().lowercase()}|$startTime"
             if (!scheduledSlots.add(eventSlot)) return@forEach
 
             currentKeys += key
-            if (scheduled[key] != startTime) {
-                val notification = event.toNotification(key)
-                scheduleNotification(context, notification, startTime - now)
-                scheduled[key] = startTime
+
+            if (startTime > now + 5_000L) {
+                if (scheduled[key] != startTime) {
+                    val notification = event.toNotification(key)
+                    scheduleNotification(context, notification, startTime - now)
+                    scheduled[key] = startTime
+                }
+            }
+
+            // Schedule the follow-up even when the kick-off time has just passed,
+            // as long as the reminder itself is still in the future.
+            val followUpTime = startTime + FOLLOW_UP_DELAY_MS
+            if (followUpTime > now + 5_000L) {
+                if (followUps[key] != followUpTime) {
+                    val notification = event.toNotification(
+                        key,
+                        stage = LIVE_EVENT_STAGE_LIVE
+                    )
+                    scheduleNotification(context, notification, followUpTime - now)
+                    followUps[key] = followUpTime
+                }
+            } else {
+                followUps.remove(key)
             }
         }
 
         scheduled.keys
             .filter { it !in currentKeys }
             .forEach { key ->
-                WorkManager.getInstance(context).cancelUniqueWork(workName(key))
-                cancelAlarm(context, key)
+                cancelScheduledNotification(context, key, LIVE_EVENT_STAGE_START)
                 scheduled.remove(key)
             }
-        writeScheduled(context, scheduled)
+        followUps.keys
+            .filter { it !in currentKeys }
+            .forEach { key ->
+                cancelScheduledNotification(context, key, LIVE_EVENT_STAGE_LIVE)
+                followUps.remove(key)
+            }
+        writeScheduled(context, SCHEDULED_KEYS, scheduled)
+        writeScheduled(context, FOLLOW_UP_KEYS, followUps)
     }
 
     fun cancelScheduledEvents(context: Context) {
-        readScheduled(context).keys.forEach { key ->
-            cancelAlarm(context, key)
+        val keys = readScheduled(context, SCHEDULED_KEYS).keys +
+            readScheduled(context, FOLLOW_UP_KEYS).keys
+        keys.forEach { key ->
+            cancelAlarm(context, key, LIVE_EVENT_STAGE_START)
+            cancelAlarm(context, key, LIVE_EVENT_STAGE_LIVE)
         }
         WorkManager.getInstance(context).cancelAllWorkByTag(WORK_TAG)
         PreferenceManager.getDefaultSharedPreferences(context)
             .edit()
             .remove(SCHEDULED_KEYS)
+            .remove(FOLLOW_UP_KEYS)
             .apply()
     }
 
-    fun clearScheduledEntry(context: Context, key: String) {
-        cancelAlarm(context, key)
-        val scheduled = readScheduled(context)
+    fun clearScheduledEntry(
+        context: Context,
+        key: String,
+        stage: String = LIVE_EVENT_STAGE_START
+    ) {
+        cancelAlarm(context, key, stage)
+        val preferenceKey = scheduledPreferenceKey(stage)
+        val scheduled = readScheduled(context, preferenceKey)
         scheduled.remove(key)
-        writeScheduled(context, scheduled)
+        writeScheduled(context, preferenceKey, scheduled)
     }
 
-    internal fun cancelScheduledFallback(context: Context, key: String) {
-        WorkManager.getInstance(context).cancelUniqueWork(workName(key))
+    internal fun cancelScheduledFallback(
+        context: Context,
+        key: String,
+        stage: String = LIVE_EVENT_STAGE_START
+    ) {
+        WorkManager.getInstance(context).cancelUniqueWork(workName(key, stage))
     }
 
     internal suspend fun notifyScheduledEvent(
@@ -210,6 +263,7 @@ object LiveEventNotifier {
             // Absent for notifications scheduled by older app versions; those
             // fall back to an unauthenticated poster request.
             posterHeaders = getString(WORK_KEY_EVENT_POSTER_HEADERS).toPosterHeaders(),
+            stage = getString(WORK_KEY_EVENT_STAGE) ?: LIVE_EVENT_STAGE_START,
         )
     }
 
@@ -221,6 +275,7 @@ object LiveEventNotifier {
             .putString(WORK_KEY_EVENT_API_NAME, apiName)
             .putString(WORK_KEY_EVENT_POSTER, posterUrl)
             .putString(WORK_KEY_EVENT_POSTER_HEADERS, posterHeaders.toPosterHeadersJson())
+            .putString(WORK_KEY_EVENT_STAGE, stage)
             .build()
 
     private fun LiveEventNotification.toAlarmIntent(context: Context): Intent =
@@ -231,6 +286,7 @@ object LiveEventNotifier {
             putExtra(WORK_KEY_EVENT_API_NAME, apiName)
             putExtra(WORK_KEY_EVENT_POSTER, posterUrl)
             putExtra(WORK_KEY_EVENT_POSTER_HEADERS, posterHeaders.toPosterHeadersJson())
+            putExtra(WORK_KEY_EVENT_STAGE, stage)
         }
 
     /**
@@ -261,13 +317,17 @@ object LiveEventNotifier {
         }.onFailure { logError(it) }.getOrNull()?.takeIf { it.isNotEmpty() }
     }
 
-    private fun SearchResponse.toNotification(key: String) = LiveEventNotification(
+    private fun SearchResponse.toNotification(
+        key: String,
+        stage: String = LIVE_EVENT_STAGE_START
+    ) = LiveEventNotification(
         key = key,
         name = name,
         url = url,
         apiName = apiName,
         posterUrl = posterUrl,
         posterHeaders = posterHeaders,
+        stage = stage,
     )
 
     private fun scheduleNotification(
@@ -286,7 +346,7 @@ object LiveEventNotifier {
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
-            workName(event.key),
+            workName(event.key, event.stage),
             ExistingWorkPolicy.REPLACE,
             request
         )
@@ -348,19 +408,19 @@ object LiveEventNotifier {
     ): PendingIntent? {
         return PendingIntentCompat.getBroadcast(
             context,
-            event.key.hashCode(),
+            requestCode(event.key, event.stage),
             event.toAlarmIntent(context),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             false
         )
     }
 
-    private fun cancelAlarm(context: Context, key: String) {
+    private fun cancelAlarm(context: Context, key: String, stage: String) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             ?: return
         val pendingIntent = PendingIntentCompat.getBroadcast(
             context,
-            key.hashCode(),
+            requestCode(key, stage),
             Intent(context, LiveEventNotificationAlarmReceiver::class.java),
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
             false
@@ -369,9 +429,28 @@ object LiveEventNotifier {
         pendingIntent.cancel()
     }
 
-    private fun readScheduled(context: Context): MutableMap<String, Long> =
+    private fun cancelScheduledNotification(context: Context, key: String, stage: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(workName(key, stage))
+        cancelAlarm(context, key, stage)
+    }
+
+    /**
+     * The kick-off alarm keeps its original request code so alarms scheduled by
+     * older app versions can still be cancelled after an update.
+     */
+    private fun requestCode(key: String, stage: String): Int =
+        if (stage == LIVE_EVENT_STAGE_START) {
+            key.hashCode()
+        } else {
+            key.hashCode() * 31 + stage.hashCode()
+        }
+
+    private fun scheduledPreferenceKey(stage: String): String =
+        if (stage == LIVE_EVENT_STAGE_START) SCHEDULED_KEYS else FOLLOW_UP_KEYS
+
+    private fun readScheduled(context: Context, preferenceKey: String): MutableMap<String, Long> =
         PreferenceManager.getDefaultSharedPreferences(context)
-            .getStringSet(SCHEDULED_KEYS, emptySet()).orEmpty()
+            .getStringSet(preferenceKey, emptySet()).orEmpty()
             .mapNotNull { entry ->
                 val separator = entry.lastIndexOf('|')
                 if (separator <= 0) return@mapNotNull null
@@ -382,17 +461,26 @@ object LiveEventNotifier {
             .toMap()
             .toMutableMap()
 
-    private fun writeScheduled(context: Context, scheduled: Map<String, Long>) {
+    private fun writeScheduled(
+        context: Context,
+        preferenceKey: String,
+        scheduled: Map<String, Long>
+    ) {
         PreferenceManager.getDefaultSharedPreferences(context)
             .edit()
             .putStringSet(
-                SCHEDULED_KEYS,
+                preferenceKey,
                 scheduled.map { "${it.key}|${it.value}" }.toSet()
             )
             .apply()
     }
 
-    private fun workName(key: String) = "live_cricket_event_${key.hashCode()}"
+    private fun workName(key: String, stage: String) =
+        if (stage == LIVE_EVENT_STAGE_START) {
+            "live_cricket_event_${key.hashCode()}"
+        } else {
+            "live_cricket_event_${stage}_${key.hashCode()}"
+        }
 
     private fun dateKey(): String = dayKey(System.currentTimeMillis())
 
@@ -468,7 +556,12 @@ object LiveEventNotifier {
         loadPoster: Boolean
     ) {
         if (!isEnabled(context) || !canPostNotifications(context)) return
-        if (!markShown(context, event.key)) return
+        val shownKey = if (event.stage == LIVE_EVENT_STAGE_START) {
+            event.key
+        } else {
+            "${event.key}|${event.stage}"
+        }
+        if (!markShown(context, shownKey)) return
         showNotification(context, event, loadPoster)
     }
 
@@ -553,7 +646,8 @@ object LiveEventNotifier {
             CHANNEL_DESCRIPTION
         )
 
-        val notificationId = event.key.hashCode()
+        val isLiveReminder = event.stage == LIVE_EVENT_STAGE_LIVE
+        val notificationId = requestCode(event.key, event.stage)
         val intent = Intent(context, MainActivity::class.java).apply {
             data = event.url.toUri()
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -572,10 +666,16 @@ object LiveEventNotifier {
 
         val poster = if (loadPoster) loadPosterBitmap(context, event) else null
 
-        val notificationText = context.getString(R.string.live_event_started_text)
+        val title = context.getString(
+            if (isLiveReminder) R.string.live_event_live_title else R.string.live_event_started_title,
+            event.name
+        )
+        val notificationText = context.getString(
+            if (isLiveReminder) R.string.live_event_live_text else R.string.live_event_started_text
+        )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baseline_notifications_active_24)
-            .setContentTitle(context.getString(R.string.live_event_started_title, event.name))
+            .setContentTitle(title)
             .setContentText(notificationText)
             .setColor(context.colorFromAttribute(R.attr.colorPrimary))
             .setColorized(true)
@@ -597,12 +697,11 @@ object LiveEventNotifier {
                     .bigLargeIcon(null as Bitmap?)
                     .setSummaryText(notificationText)
             )
-            Log.d(TAG, "Notification ${event.key.hashCode()} built with poster")
+            Log.d(TAG, "Notification $notificationId built with poster")
         } else {
             builder.setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    context.getString(R.string.live_event_started_title, event.name) +
-                        ". " + notificationText
+                    title + ". " + notificationText
                 )
             )
             Log.d(TAG, "Notification $notificationId built text-only (no poster)")

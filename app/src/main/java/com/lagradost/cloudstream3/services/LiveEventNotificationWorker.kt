@@ -20,7 +20,7 @@ class LiveEventNotificationWorker(
 
         return try {
             LiveEventNotifier.notifyScheduledEvent(context, event)
-            LiveEventNotifier.clearScheduledEntry(context, event.key)
+            LiveEventNotifier.clearScheduledEntry(context, event.key, event.stage)
             Result.success()
         } catch (t: Throwable) {
             logError(t)
