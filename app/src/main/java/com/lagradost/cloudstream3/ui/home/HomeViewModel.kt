@@ -62,6 +62,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.EnumSet
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 
 class HomeViewModel : ViewModel() {
     companion object {
@@ -573,11 +574,24 @@ class HomeViewModel : ViewModel() {
 
     private var onGoingLoad: Job? = null
     private var isCurrentlyLoadingName: String? = null
-    private fun loadAndCancel(api: MainAPI) {
+
+    /**
+     * Every new load gets a higher number. Responses belonging to an older
+     * request are ignored, so two loads of the same provider cannot race and
+     * let the slower/older one overwrite the cache or the visible page.
+     */
+    private val loadRequestId = AtomicLong(0)
+
+    private fun loadAndCancel(api: MainAPI, skipCache: Boolean = false) {
         //println("loaded ${api.name}")
         onGoingLoad?.cancel()
         isCurrentlyLoadingName = api.name
-        onGoingLoad = load(api)
+        // Invalidate the previous request synchronously, before its coroutine can
+        // observe itself as current one more time. The generation bump and the
+        // final cache commit share HomeCache's gate: once this new generation is
+        // assigned, an older request can no longer commit its cache entry.
+        val requestId = HomeCache.withCommitGate { loadRequestId.incrementAndGet() }
+        onGoingLoad = load(api, requestId, skipCache)
     }
 
     data class ExpandableHomepageList(
@@ -678,7 +692,145 @@ class HomeViewModel : ViewModel() {
         }
     }
 
-    private fun load(api: MainAPI): Job = ioSafe {
+    private fun applyHiddenCategories(
+        rawValue: List<HomePageResponse?>,
+        hiddenNormalized: Set<String>
+    ): List<HomePageResponse?> {
+        if (hiddenNormalized.isEmpty()) return rawValue
+        return rawValue.mapNotNull { response ->
+            val items = response?.items?.filterNot {
+                HomeCategorySettings.normalize(it.name) in hiddenNormalized
+            }.orEmpty()
+            if (response == null || items.isEmpty()) null
+            else response.copy(items = items)
+        }
+    }
+
+    /**
+     * Publishes one home page to the UI.
+     *
+     * A [fromCache] page is shown as soon as it is read from disk, but it does not
+     * feed [rememberHomeCards] or [loadResumeWatching]: stale cards must never be
+     * used to prune Continue Watching. The fresh response that follows does that a
+     * moment later, after the rows are already on screen.
+     */
+    /**
+     * Cached rows do not include hero preview pages, so when the refresh fails
+     * there is nothing to show in the slider. Clear the Loading state explicitly
+     * instead of leaving the shimmer running forever.
+     */
+    private fun publishCachedFallbackPreview() {
+        previewResponses.clear()
+        previewResponsesAdded.clear()
+        currentShuffledList = emptyList()
+        _randomItems.postValue(emptyList())
+        _preview.postValue(Resource.Failure(false, "Using saved homepage"))
+    }
+
+    private suspend fun renderHome(
+        api: MainAPI,
+        rawValue: List<HomePageResponse?>,
+        hiddenNormalized: Set<String>,
+        fromCache: Boolean,
+    ) {
+        try {
+            val ctx = context
+            if (ctx != null && !fromCache) {
+                HomeCategorySettings.rememberCategories(
+                    ctx,
+                    HomeCategorySettings.providerKey(api),
+                    rawValue.filterNotNull()
+                        .flatMap { it.items }
+                        .map { it.name }
+                )
+            }
+
+            val loadedValue = applyHiddenCategories(rawValue, hiddenNormalized)
+
+            if (!fromCache) {
+                rememberHomeCards(api, loadedValue)
+            }
+
+            expandable.clear()
+            loadedValue.forEach { home ->
+                home?.items?.forEach { list ->
+                    val filteredList =
+                        ctx?.filterHomePageListByFilmQuality(list) ?: list
+                    // Remember which plugin produced these items so opening one
+                    // resolves that exact plugin (two plugins may share a name).
+                    val homeSourcePlugin = api.sourcePlugin
+                    if (homeSourcePlugin != null) {
+                        filteredList.list.forEach { it.setSourcePlugin(homeSourcePlugin) }
+                    }
+                    expandable[list.name] =
+                        ExpandableHomepageList(
+                            filteredList.copy(
+                                list = CopyOnWriteArrayList(
+                                    filteredList.list
+                                )
+                            ), 1, home.hasNext
+                        )
+                }
+            }
+
+            // Publish the rows before the hero previews are loaded. Preview loading
+            // makes several provider requests; waiting for them made the whole home
+            // screen look empty on a cold start.
+            _page.postValue(Resource.Success(expandable))
+
+            if (fromCache) return
+
+            val items = loadedValue.mapNotNull { it?.items }.flatten()
+
+            previewResponses.clear()
+            previewResponsesAdded.clear()
+
+            if (items.isNotEmpty()) {
+                val currentList =
+                    items.shuffled().filter { it.list.isNotEmpty() }
+                        .flatMap { it.list }
+                        .distinctBy { it.url }.toList()
+
+                if (currentList.isNotEmpty()) {
+                    val randomItems =
+                        ctx?.filterSearchResultByFilmQuality(currentList.shuffled())
+                            ?: currentList.shuffled()
+
+                    updatePreviewResponses(
+                        previewResponses,
+                        previewResponsesAdded,
+                        randomItems,
+                        3
+                    )
+
+                    _randomItems.postValue(randomItems)
+                    currentShuffledList = randomItems
+                }
+            }
+            if (previewResponses.isEmpty()) {
+                _preview.postValue(
+                    Resource.Failure(
+                        false,
+                        "No homepage responses"
+                    )
+                )
+            } else {
+                _preview.postValue(Resource.Success((previewResponsesAdded.size < currentShuffledList.size) to previewResponses))
+            }
+            // The original cards are now known: prune live entries from this
+            // plugin that it no longer serves.
+            loadResumeWatching()
+        } catch (e: Exception) {
+            _randomItems.postValue(emptyList())
+            logError(e)
+        }
+    }
+
+    private fun load(
+        api: MainAPI,
+        requestId: Long,
+        skipCache: Boolean = false,
+    ): Job = ioSafe {
         repo = //if (api != null) {
             APIRepository(api)
         //} else {
@@ -694,9 +846,6 @@ class HomeViewModel : ViewModel() {
             return@ioSafe
         }
 
-
-        _page.postValue(Resource.Loading())
-        _preview.postValue(Resource.Loading())
         // cancel the current preview expand as that is no longer relevant
         addJob?.cancel()
 
@@ -715,112 +864,82 @@ class HomeViewModel : ViewModel() {
             if (hiddenNormalized.isEmpty()) null
             else { name -> HomeCategorySettings.normalize(name) in hiddenNormalized }
 
+        // Each provider has its own cache entry, so switching to a new plugin
+        // never shows the previous plugin's rows while the new one is fetching.
+        // The refresh button passes skipCache=true and always starts from the
+        // spinner + provider response, so it can never appear to "not refresh".
+        val cachedResult = if (skipCache) null else ctx?.let {
+            HomeCache.read(it, providerKey)
+        }
+        val cachedValue = cachedResult?.pages
+        val hasCachedPage = cachedValue?.any { it?.items?.isNotEmpty() == true } == true
+        // Older than the expiry bucket: do not show it up front. It is still kept
+        // as a fallback for when the refresh fails (e.g. offline).
+        val useCacheImmediately = hasCachedPage && cachedResult?.isExpired != true
+
+        // A newer load started while the cache was being read.
+        if (requestId != loadRequestId.get()) return@ioSafe
+
+        if (useCacheImmediately && cachedValue != null) {
+            // Rows appear immediately; the request below refreshes them behind.
+            renderHome(api, cachedValue, hiddenNormalized, fromCache = true)
+            _preview.postValue(Resource.Loading())
+        } else {
+            _page.postValue(Resource.Loading())
+            _preview.postValue(Resource.Loading())
+        }
+
         when (val data = repo?.getMainPage(1, null, skipCategory)) {
             is Resource.Success -> {
-                try {
-                    val rawValue = data.value
-                    if (ctx != null) {
-                        HomeCategorySettings.rememberCategories(
-                            ctx,
-                            providerKey,
-                            rawValue.filterNotNull()
-                                .flatMap { it.items }
-                                .map { it.name }
-                        )
-                    }
-                    val loadedValue = if (hiddenNormalized.isEmpty()) {
-                        rawValue
+                // This response is stale; a newer request owns the cache and UI.
+                if (requestId != loadRequestId.get()) return@ioSafe
+
+                val rawValue = data.value
+                if (ctx != null) {
+                    if (rawValue.any { it?.items?.isNotEmpty() == true }) {
+                        HomeCache.write(ctx, providerKey, rawValue) {
+                            requestId == loadRequestId.get()
+                        }
                     } else {
-                        rawValue.mapNotNull { response ->
-                            val items = response?.items?.filterNot {
-                                HomeCategorySettings.normalize(it.name) in hiddenNormalized
-                            }.orEmpty()
-                            if (response == null || items.isEmpty()) null
-                            else response.copy(items = items)
+                        HomeCache.remove(ctx, providerKey) {
+                            requestId == loadRequestId.get()
                         }
                     }
-                    repo?.api?.let { rememberHomeCards(it, loadedValue) }
-                    expandable.clear()
-                    loadedValue.forEach { home ->
-                        home?.items?.forEach { list ->
-                            val filteredList =
-                                context?.filterHomePageListByFilmQuality(list) ?: list
-                            // Remember which plugin produced these items so opening one
-                            // resolves that exact plugin (two plugins may share a name).
-                            val homeSourcePlugin = repo?.api?.sourcePlugin
-                            if (homeSourcePlugin != null) {
-                                filteredList.list.forEach { it.setSourcePlugin(homeSourcePlugin) }
-                            }
-                            expandable[list.name] =
-                                ExpandableHomepageList(
-                                    filteredList.copy(
-                                        list = CopyOnWriteArrayList(
-                                            filteredList.list
-                                        )
-                                    ), 1, home.hasNext
-                                )
-                        }
-                    }
-
-                    val items = loadedValue.mapNotNull { it?.items }.flatten()
-
-
-                    previewResponses.clear()
-                    previewResponsesAdded.clear()
-
-                    //val home = data.value
-                    if (items.isNotEmpty()) {
-                        val currentList =
-                            items.shuffled().filter { it.list.isNotEmpty() }
-                                .flatMap { it.list }
-                                .distinctBy { it.url }.toList()
-
-                        if (currentList.isNotEmpty()) {
-                            val randomItems =
-                                context?.filterSearchResultByFilmQuality(currentList.shuffled())
-                                    ?: currentList.shuffled()
-
-                            updatePreviewResponses(
-                                previewResponses,
-                                previewResponsesAdded,
-                                randomItems,
-                                3
-                            )
-
-                            _randomItems.postValue(randomItems)
-                            currentShuffledList = randomItems
-                        }
-                    }
-                    if (previewResponses.isEmpty()) {
-                        _preview.postValue(
-                            Resource.Failure(
-                                false,
-                                "No homepage responses"
-                            )
-                        )
-                    } else {
-                        _preview.postValue(Resource.Success((previewResponsesAdded.size < currentShuffledList.size) to previewResponses))
-                    }
-                    _page.postValue(Resource.Success(expandable))
-                    // The original cards are now known: prune live entries from this
-                    // plugin that it no longer serves.
-                    loadResumeWatching()
-                } catch (e: Exception) {
-                    _randomItems.postValue(emptyList())
-                    logError(e)
                 }
+                // The cache write suspends; a newer load may have started while it
+                // ran. Re-check immediately before publishing this response.
+                if (requestId != loadRequestId.get()) return@ioSafe
+                renderHome(api, rawValue, hiddenNormalized, fromCache = false)
             }
 
             is Resource.Failure -> {
-                @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
-                _page.postValue(data!!)
-                @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
-                _preview.postValue(data!!)
+                if (requestId != loadRequestId.get()) return@ioSafe
+
+                // Keeping cached rows is better than replacing them with an error
+                // while the provider is temporarily unreachable or still loading.
+                when {
+                    useCacheImmediately -> publishCachedFallbackPreview()
+                    // Expired cache was hidden while refreshing; show it now as an
+                    // offline fallback instead of an error screen.
+                    hasCachedPage && cachedValue != null -> {
+                        renderHome(api, cachedValue, hiddenNormalized, fromCache = true)
+                        publishCachedFallbackPreview()
+                    }
+
+                    else -> {
+                        @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
+                        _page.postValue(data!!)
+                        @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
+                        _preview.postValue(data!!)
+                    }
+                }
             }
 
             else -> Unit
         }
-        isCurrentlyLoadingName = null
+        if (requestId == loadRequestId.get()) {
+            isCurrentlyLoadingName = null
+        }
     }
 
     fun click(callback: SearchClickCallback) {
@@ -940,7 +1059,8 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun reloadHome(unused: Boolean = false) {
-        loadAndCancel(DataStoreHelper.currentHomePage, true)
+        // A reload means "give me the current provider data", not the saved page.
+        loadAndCancel(DataStoreHelper.currentHomePage, true, skipCache = true)
         loadCricketLive(force = true)
     }
 
@@ -949,10 +1069,14 @@ class HomeViewModel : ViewModel() {
      * cricket schedule/cards too, without leaving and reopening Home.
      */
     fun reloadHomeFromUI() {
+        // skipCache is what makes ic_refresh always perform a real provider
+        // request: it skips the saved page and the stale fallback, so the user
+        // sees loading and then the fresh API response.
         loadAndCancel(
             apiName.value ?: noneApi.name,
             forceReload = true,
-            fromUI = true
+            fromUI = true,
+            skipCache = true,
         )
         loadCricketLive(force = true)
     }
@@ -1030,14 +1154,15 @@ class HomeViewModel : ViewModel() {
     fun loadAndCancel(
         preferredApi: MainAPI,
         forceReload: Boolean = true,
-        fromUI: Boolean = false
+        fromUI: Boolean = false,
+        skipCache: Boolean = false,
     ) =
         ioSafe {
             if (fromUI) {
                 DataStoreHelper.currentHomePage = preferredApi.name
                 DataStoreHelper.currentHomeSource = preferredApi.sourcePlugin
             }
-            loadAndCancel(preferredApi)
+            loadAndCancel(preferredApi, skipCache)
             reloadAccount()
         }
 
@@ -1045,7 +1170,8 @@ class HomeViewModel : ViewModel() {
     fun loadAndCancel(
         preferredApiName: String?,
         forceReload: Boolean = true,
-        fromUI: Boolean = false
+        fromUI: Boolean = false,
+        skipCache: Boolean = false,
     ) =
         ioSafe {
             //println("trying to load $preferredApiName")
@@ -1087,7 +1213,7 @@ class HomeViewModel : ViewModel() {
                         DataStoreHelper.currentHomePage = customApi.name
                         DataStoreHelper.currentHomeSource = null
                     }
-                    loadAndCancel(customApi)
+                    loadAndCancel(customApi, skipCache = skipCache)
                 }
                 reloadAccount()
                 return@ioSafe
@@ -1108,7 +1234,7 @@ class HomeViewModel : ViewModel() {
                     DataStoreHelper.currentHomePage = noneApi.name
                     DataStoreHelper.currentHomeSource = null
                 }
-                loadAndCancel(noneApi)
+                loadAndCancel(noneApi, skipCache = skipCache)
             } else if (preferredApiName == randomApi.name) {
                 // randomize the api, if none exist like if not loaded or not installed
                 // then use nothing
@@ -1120,10 +1246,10 @@ class HomeViewModel : ViewModel() {
                             CustomHomeSources.isBlockedProvider(it)
                     }
                 if (validAPIs.isNullOrEmpty()) {
-                    loadAndCancel(noneApi)
+                    loadAndCancel(noneApi, skipCache = skipCache)
                 } else {
                     val apiRandom = validAPIs.random()
-                    loadAndCancel(apiRandom)
+                    loadAndCancel(apiRandom, skipCache = skipCache)
                     if (fromUI) {
                         DataStoreHelper.currentHomePage = apiRandom.name
                         DataStoreHelper.currentHomeSource = apiRandom.sourcePlugin
@@ -1133,7 +1259,7 @@ class HomeViewModel : ViewModel() {
                 // API is not found aka not loaded or removed, post the loading
                 // progress if waiting for plugins, otherwise nothing
                 if (PluginManager.loadedOnlinePlugins || PluginManager.isSafeMode()) {
-                    loadAndCancel(noneApi)
+                    loadAndCancel(noneApi, skipCache = skipCache)
                 } else {
                     _page.postValue(Resource.Loading())
                     if (preferredApiName != null)
@@ -1145,7 +1271,7 @@ class HomeViewModel : ViewModel() {
                     DataStoreHelper.currentHomePage = api.name
                     DataStoreHelper.currentHomeSource = api.sourcePlugin
                 }
-                loadAndCancel(api)
+                loadAndCancel(api, skipCache = skipCache)
             }
             reloadAccount()
         }
