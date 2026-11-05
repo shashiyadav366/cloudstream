@@ -501,10 +501,15 @@ class PlayerGeneratorViewModel : ViewModel() {
  */
 fun getMaxVideoHeight(context: Context): Int {
     val settings = AppSettings(context)
-    val maxVideoHeight = if (context.isUsingMobileData()) {
-        settings.player.maxVideoHeightMobileData.get()
-    } else {
-        settings.player.maxVideoHeight.get()
-    }
+    // The settings screen exposes a single "Maximum video quality" limit, so it must also
+    // apply on mobile data. The old separate mobile-data limit has no UI anymore and is
+    // only honored when a value was explicitly stored by an older app version.
+    val mobileDataMaxVideoHeight = settings.player.maxVideoHeightMobileData
+    val maxVideoHeight =
+        if (context.isUsingMobileData() && mobileDataMaxVideoHeight.isSet()) {
+            mobileDataMaxVideoHeight.get()
+        } else {
+            settings.player.maxVideoHeight.get()
+        }
     return if (maxVideoHeight > 0) maxVideoHeight else Int.MAX_VALUE
 }
