@@ -2004,6 +2004,23 @@ class GeneratorPlayer : FullScreenPlayer() {
         startFallbackHandler.removeCallbacksAndMessages(null)
     }
 
+    /**
+     * Whether this link is at or below the configured maximum video quality.
+     * Links without a known resolution (local files, torrents) cannot be checked and are
+     * never blocked by the limit.
+     */
+    private fun VideoLink.isWithinMaxVideoHeight(maxVideoHeight: Int): Boolean {
+        if (maxVideoHeight >= Int.MAX_VALUE) return true
+        val quality = first?.quality ?: return true
+        return quality <= maxVideoHeight
+    }
+
+    private fun DisplayLink.isWithinMaxVideoHeight(maxVideoHeight: Int): Boolean =
+        link.isWithinMaxVideoHeight(maxVideoHeight)
+
+    /** Episode instance the "nothing within the maximum video quality" message was shown for. */
+    private var maxVideoHeightNoticeInstance = -1
+
     private fun startPlayer() {
         // We don't want double load when you skip loading
         if (isPlayerActive.get()) {
@@ -2013,24 +2030,57 @@ class GeneratorPlayer : FullScreenPlayer() {
 
         val maxVideoHeight = context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
         val links = viewModel.state.sortLinks(currentQualityProfile, maxVideoHeight)
+        val usableLinks = links.filter { it.shouldUseLink }
 
-        // The maximum resolution caps the default link (e.g. auto-play at 720p), but links
-        // above it stay visible and selectable so the user can switch to 1080p if wanted.
-        val firstAvailableLink = (links.firstOrNull {
-            it.shouldUseLink && it.link.first?.quality?.let { quality ->
-                maxVideoHeight >= Int.MAX_VALUE || quality <= maxVideoHeight
-            } ?: true
-        } ?: links.firstOrNull { it.shouldUseLink })?.link
-        if (firstAvailableLink == null) {
-            noLinksFound()
+        // "Automatic" means no limit, so the best link is taken as is. A configured maximum
+        // video quality is a hard limit for automatic playback: only links at or below it,
+        // or links without a known resolution, may start playback. The links are sorted
+        // highest priority first, so this is the best link within the limit.
+        val linkWithinMaxVideoHeight =
+            usableLinks.firstOrNull { it.isWithinMaxVideoHeight(maxVideoHeight) }
+
+        if (linkWithinMaxVideoHeight == null) {
+            if (usableLinks.isEmpty()) {
+                noLinksFound()
+                return
+            }
+            if (viewModel.state.loading is Resource.Loading) {
+                // A link within the limit may still be resolved. There is no timer here: the
+                // next link update calls startPlayer again, so playback starts the moment
+                // such a link exists, with no added delay.
+                return
+            }
+            // Every resolved link is above the limit, so do not start one automatically.
+            onNothingWithinMaxVideoQuality(maxVideoHeight)
             return
         }
         // Atomic operation to prevent double loading
         if (!isPlayerActive.compareAndSet(false, true)) {
             return
         }
-        loadLink(firstAvailableLink, false)
+        loadLink(linkWithinMaxVideoHeight.link, false)
         showPlayerMetadata()
+    }
+
+    /**
+     * Nothing the provider resolved is at or below the configured maximum video quality.
+     * Playback is not started above the limit; instead the sources dialog is opened so a
+     * higher quality can be picked manually for this video.
+     */
+    private fun onNothingWithinMaxVideoQuality(maxVideoHeight: Int) {
+        if (maxVideoHeightNoticeInstance == viewModel.state.instance) return
+        maxVideoHeightNoticeInstance = viewModel.state.instance
+
+        context?.let { ctx ->
+            showToast(
+                ctx.getString(
+                    R.string.no_links_within_max_video_quality,
+                    Qualities.getStringByIntFull(maxVideoHeight)
+                ),
+                Toast.LENGTH_LONG
+            )
+        }
+        showMirrorsDialogue()
     }
 
     private fun showPlayerMetadata() {
@@ -2097,13 +2147,22 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun getNextLink(): DisplayLink? {
-        val links = viewModel.state.sortLinks(
-            currentQualityProfile,
-            context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
-        )
+        val maxVideoHeight = context?.let { getMaxVideoHeight(it) } ?: Int.MAX_VALUE
+        val links = viewModel.state.sortLinks(currentQualityProfile, maxVideoHeight)
+        // Falling back to another mirror is automatic, so it must not land above the maximum
+        // video quality either. If the current link was picked manually above the limit, its
+        // mirrors stay usable so that manual choice keeps working.
+        val limit = if (currentSelectedLink?.isWithinMaxVideoHeight(maxVideoHeight) == false) {
+            Int.MAX_VALUE
+        } else {
+            maxVideoHeight
+        }
         val currentIndex = links.indexOfFirst { it.link == currentSelectedLink }
-        val nextPotentialLink =
-            links.withIndex().firstOrNull { it.index > currentIndex && it.value.shouldUseLink }
+        val nextPotentialLink = links.withIndex().firstOrNull {
+            it.index > currentIndex &&
+                    it.value.shouldUseLink &&
+                    it.value.isWithinMaxVideoHeight(limit)
+        }
         return nextPotentialLink?.value
     }
 

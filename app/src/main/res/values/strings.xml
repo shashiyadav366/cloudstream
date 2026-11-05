@@ -440,6 +440,7 @@
     <string name="watch_quality_pref_data">Preferred watch quality (Mobile Data)</string>
     <string name="max_video_quality">Maximum video quality</string>
     <string name="max_video_quality_des">Links and streams above this resolution are skipped. Older TVs should stay at 1080p to avoid playback failures.</string>
+    <string name="no_links_within_max_video_quality">No links at or below %s. Pick a source manually to watch in a higher quality.</string>
     <string name="limit_title">Video player title max chars</string>
     <string name="limit_title_rez">Show player information</string>
     <string name="video_buffer_size_settings">Video buffer size</string>
