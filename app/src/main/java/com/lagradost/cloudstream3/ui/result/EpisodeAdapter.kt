@@ -14,6 +14,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.databinding.ResultEpisodeBinding
 import com.lagradost.cloudstream3.databinding.ResultEpisodeLargeBinding
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.secondsToReadable
 import com.lagradost.cloudstream3.ui.BaseDiffCallback
 import com.lagradost.cloudstream3.ui.NoStateAdapter
@@ -57,6 +58,7 @@ const val ACTION_RELOAD_EPISODE = 8
 const val ACTION_SHOW_OPTIONS = 10
 
 const val ACTION_CLICK_DEFAULT = 11
+const val ACTION_PLAY_EPISODE_FROM_SOURCE = 22
 const val ACTION_SHOW_TOAST = 12
 const val ACTION_SHOW_DESCRIPTION = 15
 
@@ -158,7 +160,7 @@ class EpisodeAdapter(
                         episodeHolder.setPadding(0)
                     }
 
-                    downloadButton.isVisible = hasDownloadSupport
+                    downloadButton.isVisible = hasDownloadSupport && !item.tvType.isLiveStream()
                     downloadButton.setDefaultClickListener(
                         DownloadObjects.DownloadEpisodeCached(
                             name = item.name,
@@ -379,7 +381,7 @@ class EpisodeAdapter(
                 }
 
                 binding.apply {
-                    downloadButton.isVisible = hasDownloadSupport
+                    downloadButton.isVisible = hasDownloadSupport && !item.tvType.isLiveStream()
                     downloadButton.setDefaultClickListener(
                         DownloadObjects.DownloadEpisodeCached(
                             name = item.name,

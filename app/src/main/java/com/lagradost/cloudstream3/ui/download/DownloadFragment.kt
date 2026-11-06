@@ -233,7 +233,7 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
         binding.apply {
             openLocalVideoButton.apply {
                 isGone = isLayout(TV)
-                setOnClickListener { openLocalVideo() }
+                setOnClickListener { openLocalMedia() }
             }
             downloadStreamButton.apply {
                 isGone = isLayout(TV)
@@ -249,6 +249,11 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
 
             downloadStreamButtonTv.setOnClickListener { showStreamInputDialog(it.context) }
             steamImageviewHolder.isVisible = isLayout(TV)
+
+            // TV has no floating buttons, so the local file picker lives in the app bar.
+            localMediaButtonTv.isFocusableInTouchMode = isLayout(TV)
+            localMediaButtonTv.setOnClickListener { openLocalMedia() }
+            localMediaImageviewHolder.isVisible = isLayout(TV)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -299,14 +304,17 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
         view?.setLayoutWidth(bytes)
     }
 
-    private fun openLocalVideo() {
-        val intent = Intent()
-            .setAction(Intent.ACTION_GET_CONTENT)
-            .setType("video/*")
+    private fun openLocalMedia() {
+        // Local videos and audio files both play in the app player, so let the picker
+        // show either. OpenDocument (rather than GetContent) hands out a persistable
+        // grant, which lets the Continue watching card replay the file later.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-            .addFlags(FLAG_GRANT_READ_URI_PERMISSION) // Request temporary access
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("video/*", "audio/*"))
+            .addFlags(FLAG_GRANT_READ_URI_PERMISSION)
         safe {
-            videoResultLauncher.launch(
+            mediaResultLauncher.launch(
                 Intent.createChooser(
                     intent,
                     getString(R.string.open_local_video)
@@ -376,8 +384,8 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
         }
     }
 
-    // Open local video from files using content provider x safeFile
-    private val videoResultLauncher = registerForActivityResult(
+    // Open a local video or audio file from storage using content provider x safeFile
+    private val mediaResultLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult

@@ -165,6 +165,11 @@ class CS3IPlayer : IPlayer {
     private var ignoreSSL: Boolean = true
     private var playBackSpeed: Float = 1.0f
     override var isLiveStream = false
+    private var audioOnlyStream = false
+    override val isAudioOnlyStream: Boolean
+        get() = audioOnlyStream
+    private var audioOnlyHint = false
+    private var urlAudioOnlyHint = false
 
     /**
      * Shared compressor instance — only created when the setting is enabled.
@@ -333,6 +338,15 @@ class CS3IPlayer : IPlayer {
 
         // release the current exoplayer and cache
         releasePlayer()
+
+        // Detect common audio files up front so they start at 1x instead of briefly using a
+        // remembered video speed. Streams without an audio extension are detected from tracks.
+        urlAudioOnlyHint = link?.url.looksLikeAudioFile() ||
+                data?.uri?.toString().looksLikeAudioFile() ||
+                data?.name.looksLikeAudioFile()
+        if (urlAudioOnlyHint) {
+            resetAudioOnlySpeed()
+        }
 
         if (link != null) {
             // only video support atm
@@ -531,6 +545,51 @@ class CS3IPlayer : IPlayer {
     }
 
     /**
+     * Audio-only content (music, audio files, podcasts, etc.) must always start at 1x and,
+     * like live streams, must never remember a playback speed. Detect it from the tracks
+     * ExoPlayer reports: audio present and no video track.
+     */
+    private fun updateAudioOnlyStream(tracks: Tracks) {
+        val hasAudio = tracks.groups.any {
+            it.type == TRACK_TYPE_AUDIO && it.mediaTrackGroup.length > 0
+        }
+        val hasVideo = tracks.groups.any {
+            it.type == TRACK_TYPE_VIDEO && it.mediaTrackGroup.length > 0
+        }
+        applyAudioOnlyState(audioOnlyHint || urlAudioOnlyHint || (hasAudio && !hasVideo))
+    }
+
+    private fun applyAudioOnlyState(audioOnly: Boolean) {
+        if (audioOnly) {
+            if (!isAudioOnlyStream) {
+                resetAudioOnlySpeed()
+            }
+        } else {
+            audioOnlyStream = false
+        }
+    }
+
+    private fun resetAudioOnlySpeed() {
+        playBackSpeed = 1.0f
+        exoPlayer?.setPlaybackSpeed(1.0f)
+        audioOnlyStream = true
+        event(PlaybackSpeedChangedEvent(1.0f))
+    }
+
+    override fun setAudioOnlyStream(audioOnly: Boolean) {
+        audioOnlyHint = audioOnly
+        if (audioOnly) {
+            // Reset even if the previous stream was also audio, so every audio file starts at 1x.
+            resetAudioOnlySpeed()
+        }
+    }
+
+    private fun String?.looksLikeAudioFile(): Boolean {
+        val path = this?.substringBefore('?')?.substringBefore('#')?.lowercase() ?: return false
+        return AUDIO_FILE_EXTENSIONS.any { path.endsWith(it) }
+    }
+
+    /**
      * @return True if the player should be reloaded
      * */
     override fun setPreferredSubtitles(subtitle: SubtitleData?): Boolean {
@@ -698,6 +757,11 @@ class CS3IPlayer : IPlayer {
 
     companion object {
         private const val CRONET_TIMEOUT_MS = 15_000
+
+        private val AUDIO_FILE_EXTENSIONS = listOf(
+            ".mp3", ".m4a", ".m4b", ".aac", ".flac", ".wav", ".ogg", ".oga",
+            ".opus", ".wma", ".aiff", ".aif", ".alac", ".ape", ".amr", ".caf",
+        )
 
         /**
          * Single shared engine, to minimize the overhead of maintaining many as:
@@ -1539,6 +1603,7 @@ return exoPlayerBuilder.build().apply {
             if (isLiveStream && !wasLive) {
                 this@CS3IPlayer.playBackSpeed = 1.0f
             }
+            updateAudioOnlyStream(currentTracks)
             setPlaybackSpeed(this@CS3IPlayer.playBackSpeed)
             event(PlaybackSpeedChangedEvent(this@CS3IPlayer.getPlaybackSpeed()))
         }
@@ -1560,6 +1625,7 @@ return exoPlayerBuilder.build().apply {
         try {
             hasUsedFirstRender = false
             isLiveStream = false
+            audioOnlyStream = audioOnlyHint || urlAudioOnlyHint
 
             val playWhenReady = if (settings.player.startPaused.get()) {
                 false
@@ -1622,6 +1688,8 @@ return exoPlayerBuilder.build().apply {
             exoPlayer?.addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) {
                     safe {
+                        updateAudioOnlyStream(tracks)
+
                         val textTracks = tracks.groups.filter { it.type == TRACK_TYPE_TEXT }
 
                         playerSelectedSubtitleTracks =

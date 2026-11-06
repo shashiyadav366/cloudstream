@@ -72,6 +72,7 @@
     <string name="download_started">Download Started</string>
     <string name="download_failed">Download Failed</string>
     <string name="download_canceled">Download Canceled</string>
+    <string name="download_live_not_supported">Live streams cannot be downloaded</string>
     <string name="download_done">Download Done</string>
     <string name="downloads_delete_select">Select Items to Delete</string>
     <string name="downloads_empty">There are currently no downloads.</string>
@@ -81,7 +82,8 @@
     <string name="deselect_all">Deselect All</string>
     <string name="update_started">Update Started</string>
     <string name="stream">Network stream</string>
-    <string name="open_local_video">Open local video</string>
+    <string name="open_local_video">Open local video or audio</string>
+    <string name="play_local_media">Local file</string>
     <string name="error_loading_links_toast">Error Loading Links</string>
     <string name="links_reloaded_toast">Links Reloaded</string>
     <string name="download_storage_text">Internal Storage</string>
@@ -410,6 +412,7 @@
     <string name="episode_action_chromecast_mirror">Chromecast mirror</string>
     <string name="episode_action_cast_mirror">Cast mirror</string>
     <string name="episode_action_play_in_app">Play in app</string>
+    <string name="episode_action_play_from_source">Play from source</string>
     <string name="episode_action_add_to_continue_watching">Add to "Continue Watching"</string>
     <string name="episode_action_play_incognito">Incognito play</string>
     <string name="added_to_continue_watching">Added to Continue Watching</string>

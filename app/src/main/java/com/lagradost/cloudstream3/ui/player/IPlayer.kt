@@ -217,6 +217,12 @@ interface IPlayer {
     /** Whether the currently loaded stream is a live stream. */
     val isLiveStream: Boolean
 
+    /** Whether the currently loaded stream is audio-only (music, audio file, podcast, etc). */
+    val isAudioOnlyStream: Boolean
+
+    /** Hint the player that the next stream is audio-only based on its content type. */
+    fun setAudioOnlyStream(audioOnly: Boolean)
+
     fun getPlaybackSpeed(): Float
     fun setPlaybackSpeed(speed: Float)
 

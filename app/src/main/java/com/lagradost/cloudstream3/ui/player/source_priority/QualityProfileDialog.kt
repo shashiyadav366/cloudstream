@@ -57,7 +57,14 @@ class QualityProfileDialog private constructor(
         }
     }
 
+    private var isInitialized = false
+
     override fun show() {
+        if (isInitialized) {
+            super.show()
+            return
+        }
+        isInitialized = true
         val binding = PlayerQualityProfileDialogBinding.inflate(this.layoutInflater, null, false)
 
         setContentView(binding.root)
@@ -88,9 +95,14 @@ class QualityProfileDialog private constructor(
 
             editBtt.setOnClickListener {
                 getCurrentProfile()?.let { profile ->
-                    SourcePriorityDialog(context, themeRes, links, profile) {
+                    val priorityDialog = SourcePriorityDialog(context, themeRes, links, profile) {
                         refreshProfiles()
-                    }.show()
+                    }
+                    priorityDialog.setOnDismissListener {
+                        this@QualityProfileDialog.show()
+                    }
+                    this@QualityProfileDialog.hide()
+                    priorityDialog.show()
                 }
             }
 

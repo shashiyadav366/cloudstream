@@ -84,6 +84,10 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     // state of player UI
     protected var isShowing = false
+    private var pendingPlayerControlsRestore = false
+    private var pendingEpisodeOverlayRestore = false
+    private var pendingTracksOverlayRestore = false
+    private var isPreparingDialog = false
     protected var isLocked = false
     protected var timestampShowState = false
     private var metadataVisibilityToken = 0
@@ -194,6 +198,8 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         selectSpeedDialog = null
         selectSubtitlesDialog?.dismissSafe(activity)
         selectSubtitlesDialog = null
+        selectCompressorDialog?.dismissSafe(activity)
+        selectCompressorDialog = null
     }
 
     private fun scheduleMetadataVisibility() {
@@ -324,7 +330,8 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             // If "remember playback speed" was just turned on, apply the remembered speed to the
             // current player right away rather than only on the next video. If it was turned off,
             // go back to normal speed instead of staying stuck at the remembered speed.
-            if (!player.isLiveStream) {
+            // Live streams and audio-only content always play at 1x and never remember speed.
+            if (!player.isLiveStream && !player.isAudioOnlyStream) {
                 if (rememberPlayBackSpeedEnabled) {
                     setPlayBackSpeed(DataStoreHelper.playBackSpeed)
                 } else if (wasRememberPlayBackSpeedEnabled) {
@@ -614,9 +621,9 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     private fun setPlayBackSpeed(speed: Float) {
         try {
-            // Live stream speeds are session-only and never remembered.
+            // Live stream and audio-only speeds are session-only and never remembered.
             // Static video speeds are only remembered when the user enabled it.
-            if (rememberPlayBackSpeedEnabled && !player.isLiveStream) {
+            if (rememberPlayBackSpeedEnabled && !player.isLiveStream && !player.isAudioOnlyStream) {
                 DataStoreHelper.playBackSpeed = speed
             }
         } catch (e: Exception) {
@@ -648,6 +655,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     private fun showSubtitleOffsetDialog() {
         val ctx = context ?: return
+        hideControlsForDialog()
         // Pause player because the subtitles cannot be continuously updated to follow playback.
         player.handleEvent(
             CSPlayerEvent.Pause,
@@ -752,6 +760,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             dialog.setOnDismissListener {
                 selectSubtitlesDialog = null
                 activity?.hideSystemUI()
+                restorePlayerControlsAfterDialog()
             }
             applyBtt.setOnClickListener {
                 selectSubtitlesDialog = null
@@ -784,6 +793,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
 
     private fun showSpeedDialog() {
         val act = activity ?: return
+        hideControlsForDialog()
 
         val binding: SpeedDialogBinding = SpeedDialogBinding.inflate(
             LayoutInflater.from(act)
@@ -824,6 +834,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             activity?.hideSystemUI()
             selectSpeedDialog = null
             selectSpeedDialogBinding = null
+            restorePlayerControlsAfterDialog()
         }
 
         // if (isLayout(PHONE)) {
@@ -834,7 +845,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         //    builder.show()
         //} else {
         val builder =
-            AlertDialog.Builder(act, R.style.AlertDialogCustom)
+            AlertDialog.Builder(act, R.style.PlayerAlertDialogCustom)
                 .setView(binding.root)
         builder.setOnDismissListener(dismiss)
         val dialog = builder.create()
@@ -852,6 +863,7 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     private fun showCompressorDialog() {
         val act = activity ?: return
         val compressor = (player as? CS3IPlayer)?.compressor ?: return
+        hideControlsForDialog()
 
         // Always restore — CS3IPlayer is recreated between videos
         restoreCompressorSettings()
@@ -1064,11 +1076,12 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
         }
 
         // ── Dialog lifecycle ───────────────────────────────────────────────
-        val dialog = AlertDialog.Builder(act, R.style.AlertDialogCustom)
+        val dialog = AlertDialog.Builder(act, R.style.PlayerAlertDialogCustom)
             .setView(binding.root)
             .setOnDismissListener {
                 activity?.hideSystemUI()
                 selectCompressorDialog = null
+                restorePlayerControlsAfterDialog()
             }
             .create()
         selectCompressorDialog = dialog
@@ -1215,13 +1228,75 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
     }
 
     override fun onAutoHideUI() {
-        if (player.getIsPlaying() && !isShowingEpisodeOverlay && !isShowingTracksOverlay) onClickChange()
+        if (player.getIsPlaying() && !isDialogOpen() && !isShowingEpisodeOverlay && !isShowingTracksOverlay) onClickChange()
     }
 
     protected fun hidePlayerUI() {
         if (isShowing && !isShowingEpisodeOverlay && !isShowingTracksOverlay) {
             isShowing = false
             animateLayoutChanges()
+        }
+    }
+
+    /** Hides every player control surface before opening a fullscreen dialog. */
+    protected fun hideControlsForDialog() {
+        val wasShowing = isShowing || pendingPlayerControlsRestore
+        val wasEpisodeOverlay = isShowingEpisodeOverlay || pendingEpisodeOverlayRestore
+        val wasTracksOverlay = isShowingTracksOverlay || pendingTracksOverlayRestore
+        isPreparingDialog = true
+        playerHostView?.cancelAutoHide()
+        toggleEpisodesOverlay(false)
+        toggleTracksOverlay(false)
+        closePlayerDialogs()
+        hidePlayerUI()
+        playerBinding?.playerMetadataScrim?.isVisible = false
+        playerHostView?.cancelAutoHide()
+        pendingPlayerControlsRestore = wasShowing
+        pendingEpisodeOverlayRestore = wasEpisodeOverlay
+        pendingTracksOverlayRestore = wasTracksOverlay
+        isPreparingDialog = false
+    }
+
+    /** Reopens the previous control surface after the last fullscreen dialog closes. */
+    protected fun restorePlayerControlsAfterDialog() {
+        if (isPreparingDialog) return
+        val act = activity
+        if (act == null || act.isFinishing || act.isDestroyed) return
+        if (isDialogOpen()) return
+        if (!pendingPlayerControlsRestore &&
+            !pendingEpisodeOverlayRestore &&
+            !pendingTracksOverlayRestore
+        ) return
+
+        val restoreControls = pendingPlayerControlsRestore
+        val restoreEpisodeOverlay = pendingEpisodeOverlayRestore
+        val restoreTracksOverlay = pendingTracksOverlayRestore
+        pendingPlayerControlsRestore = false
+        pendingEpisodeOverlayRestore = false
+        pendingTracksOverlayRestore = false
+
+        when {
+            restoreEpisodeOverlay -> {
+                toggleEpisodesOverlay(true)
+                if (restoreControls) {
+                    isShowing = true
+                    animateLayoutChanges()
+                }
+            }
+
+            restoreTracksOverlay -> {
+                toggleTracksOverlay(true)
+                if (restoreControls) {
+                    isShowing = true
+                    animateLayoutChanges()
+                }
+            }
+
+            restoreControls -> {
+                isShowing = true
+                animateLayoutChanges()
+                autoHide()
+            }
         }
     }
 
@@ -1348,7 +1423,10 @@ open class FullScreenPlayer : AbstractPlayerFragment<FragmentPlayerBinding>(
             KeyEvent.KEYCODE_O, KeyEvent.KEYCODE_NUMPAD_8, KeyEvent.KEYCODE_8 -> {
                 val context = context
                 if (subsProvidersIsActive && context != null) {
-                    openOnlineSubPicker(context, null) {}
+                    hideControlsForDialog()
+                    openOnlineSubPicker(context, null) {
+                        restorePlayerControlsAfterDialog()
+                    }
                 }
             }
 

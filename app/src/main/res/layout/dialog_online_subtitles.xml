@@ -109,7 +109,7 @@
                 android:layout_height="match_parent"
 
                 android:layout_rowWeight="1"
-                android:background="?attr/primaryBlackBackground"
+                android:background="@android:color/transparent"
                 android:nextFocusLeft="@id/sort_providers"
                 android:nextFocusRight="@id/cancel_btt"
                 android:requiresFadingEdge="vertical"

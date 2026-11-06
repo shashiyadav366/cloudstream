@@ -116,58 +116,85 @@ object DownloadButtonSetup {
             }
 
             DOWNLOAD_ACTION_PLAY_FILE -> {
-                activity?.let { act ->
-                    val parent = getKey<DownloadObjects.DownloadHeaderCached>(
-                        DOWNLOAD_HEADER_CACHE,
-                        click.data.parentId.toString()
-                    ) ?: return
-
-                    val episodes = getKeys(DOWNLOAD_EPISODE_CACHE)
-                        ?.mapNotNull {
-                            getKey<DownloadObjects.DownloadEpisodeCached>(it)
-                        }
-                        ?.filter { it.parentId == click.data.parentId }
-
-                    val items = mutableListOf<ExtractorUri>()
-                    val allRelevantEpisodes =
-                        episodes?.sortedWith(compareBy<DownloadObjects.DownloadEpisodeCached> {
-                            it.season ?: 0
-                        }.thenBy { it.episode })
-
-                    allRelevantEpisodes?.forEach {
-                        val keyInfo = getKey<DownloadObjects.DownloadedFileInfo>(
-                            VideoDownloadManager.KEY_DOWNLOAD_INFO,
-                            it.id.toString()
-                        ) ?: return@forEach
-
-                        items.add(
-                            ExtractorUri(
-                                // We just use a temporary placeholder for the URI,
-                                // it will be updated in generateLinks().
-                                // We just do this for performance since getting
-                                // all paths at once can be quite expensive.
-                                uri = Uri.EMPTY,
-                                id = it.id,
-                                parentId = it.parentId,
-                                name = it.name ?: act.getString(R.string.downloaded_file),
-                                season = it.season,
-                                episode = it.episode,
-                                headerName = parent.name,
-                                tvType = parent.type,
-                                basePath = keyInfo.basePath,
-                                displayName = keyInfo.displayName,
-                                relativePath = keyInfo.relativePath,
-                            )
-                        )
-                    }
-                    act.navigate(
-                        R.id.global_to_navigation_player, GeneratorPlayer.newInstance(
-                            DownloadFileGenerator(items),
-                            items.indexOfFirst { it.id == click.data.id }
-                        )
-                    )
-                }
+                playDownloadedEpisode(click.data)
             }
         }
+    }
+
+    /**
+     * True when the download exists and has finished writing. Mirrors the completion check
+     * used by the download button, including its 1 KiB padding for servers that report a
+     * slightly inaccurate content length.
+     */
+    fun isDownloadComplete(context: android.content.Context, id: Int): Boolean {
+        return VideoDownloadManager.isDownloadComplete(context, id)
+    }
+
+    fun getDownloadHeader(parentId: Int): DownloadObjects.DownloadHeaderCached? {
+        return getKey<DownloadObjects.DownloadHeaderCached>(
+            DOWNLOAD_HEADER_CACHE,
+            parentId.toString()
+        )
+            ?: getKeys(DOWNLOAD_HEADER_CACHE).orEmpty()
+                .mapNotNull { getKey<DownloadObjects.DownloadHeaderCached>(it) }
+                .filter { it.id == parentId }
+                .maxByOrNull { it.cacheTime }
+    }
+
+    /**
+     * Plays a completed download locally instead of streaming it. Returns false when there
+     * is no completed file (or no usable header), so callers can fall back to streaming.
+     */
+    fun playDownloadedEpisode(
+        episode: DownloadObjects.DownloadEpisodeCached,
+        incognito: Boolean = false,
+    ): Boolean {
+        val act = activity ?: return false
+        if (!isDownloadComplete(act, episode.id)) return false
+
+        val parent = getDownloadHeader(episode.parentId) ?: return false
+        val episodes = getKeys(DOWNLOAD_EPISODE_CACHE).orEmpty()
+            .mapNotNull { getKey<DownloadObjects.DownloadEpisodeCached>(it) }
+            .filter { it.parentId == episode.parentId }
+            .sortedWith(compareBy<DownloadObjects.DownloadEpisodeCached> {
+                it.season ?: 0
+            }.thenBy { it.episode })
+
+        val items = episodes.mapNotNull {
+            val keyInfo = getKey<DownloadObjects.DownloadedFileInfo>(
+                VideoDownloadManager.KEY_DOWNLOAD_INFO,
+                it.id.toString()
+            ) ?: return@mapNotNull null
+
+            ExtractorUri(
+                // We just use a temporary placeholder for the URI,
+                // it will be updated in generateLinks().
+                // We just do this for performance since getting
+                // all paths at once can be quite expensive.
+                uri = Uri.EMPTY,
+                id = it.id,
+                parentId = it.parentId,
+                name = it.name ?: act.getString(R.string.downloaded_file),
+                season = it.season,
+                episode = it.episode,
+                headerName = parent.name,
+                tvType = parent.type,
+                basePath = keyInfo.basePath,
+                displayName = keyInfo.displayName,
+                relativePath = keyInfo.relativePath,
+            )
+        }
+
+        val index = items.indexOfFirst { it.id == episode.id }
+        if (index < 0) return false
+
+        act.navigate(
+            R.id.global_to_navigation_player, GeneratorPlayer.newInstance(
+                DownloadFileGenerator(items),
+                index,
+                incognito = incognito,
+            )
+        )
+        return true
     }
 }

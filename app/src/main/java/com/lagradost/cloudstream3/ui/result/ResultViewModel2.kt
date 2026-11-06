@@ -72,6 +72,7 @@ import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.WatchType
+import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.LOADTYPE_ALL
 import com.lagradost.cloudstream3.ui.player.LOADTYPE_CHROMECAST
@@ -1377,19 +1378,30 @@ class ResultViewModel2 : ViewModel() {
                 }
 
                 options.add(txt(R.string.episode_action_play_in_app) to ACTION_PLAY_EPISODE_IN_PLAYER)
+                if (activity?.let { DownloadButtonSetup.isDownloadComplete(it, click.data.id) } == true) {
+                    options.add(txt(R.string.episode_action_play_from_source) to ACTION_PLAY_EPISODE_FROM_SOURCE)
+                }
                 options.add(
                     txt(R.string.episode_action_add_to_continue_watching) to ACTION_ADD_TO_CONTINUE_WATCHING
                 )
                 options.add(
                     txt(R.string.episode_action_play_incognito) to ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
                 )
-                options.addAll(
-                    listOf(
-                        txt(R.string.episode_action_auto_download) to ACTION_DOWNLOAD_EPISODE,
-                        txt(R.string.episode_action_download_mirror) to ACTION_DOWNLOAD_MIRROR,
-                        txt(R.string.episode_action_download_subtitle) to ACTION_DOWNLOAD_EPISODE_SUBTITLE_MIRROR,
-                        txt(R.string.episode_action_reload_links) to ACTION_RELOAD_EPISODE,
+                // A downloaded live stream is only a snapshot of the current playlist, not
+                // a recording, so do not offer it as a download.
+                val isLive =
+                    click.data.tvType.isLiveStream() || currentResponse?.type?.isLiveStream() == true
+                if (!isLive) {
+                    options.addAll(
+                        listOf(
+                            txt(R.string.episode_action_auto_download) to ACTION_DOWNLOAD_EPISODE,
+                            txt(R.string.episode_action_download_mirror) to ACTION_DOWNLOAD_MIRROR,
+                            txt(R.string.episode_action_download_subtitle) to ACTION_DOWNLOAD_EPISODE_SUBTITLE_MIRROR,
+                        )
                     )
+                }
+                options.add(
+                    txt(R.string.episode_action_reload_links) to ACTION_RELOAD_EPISODE
                 )
 
                 options.addAll(
@@ -1484,6 +1496,10 @@ class ResultViewModel2 : ViewModel() {
             }
 
             ACTION_DOWNLOAD_EPISODE -> {
+                if (click.data.tvType.isLiveStream() || currentResponse?.type?.isLiveStream() == true) {
+                    showToast(R.string.download_live_not_supported, Toast.LENGTH_SHORT)
+                    return
+                }
                 val response = currentResponse ?: return
                 DownloadQueueManager.addToQueue(
                     DownloadObjects.DownloadQueueItem(
@@ -1500,6 +1516,10 @@ class ResultViewModel2 : ViewModel() {
             }
 
             ACTION_DOWNLOAD_MIRROR -> {
+                if (click.data.tvType.isLiveStream() || currentResponse?.type?.isLiveStream() == true) {
+                    showToast(R.string.download_live_not_supported, Toast.LENGTH_SHORT)
+                    return
+                }
                 val response = currentResponse ?: return
                 acquireSingleLink(
                     click.data,
@@ -1590,15 +1610,19 @@ class ResultViewModel2 : ViewModel() {
             }
 
             ACTION_PLAY_EPISODE_IN_PLAYER,
-            ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO -> {
+            ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO,
+            ACTION_PLAY_EPISODE_FROM_SOURCE -> {
                 val isIncognito = click.action == ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
+                val playFromSource = click.action == ACTION_PLAY_EPISODE_FROM_SOURCE
+                val isCustomMedia = currentResponse?.type == TvType.CustomMedia
+
                 val list = HashMap<String, String>(currentResponse?.syncData ?: emptyMap())
                 val generator = generator ?: return
 
                 // I know kinda shit to iterate all, but it is 100% sure to work
                 val index = generator.videos.indexOfFirst { value -> value.id == click.data.id }
 
-                if (currentResponse?.type == TvType.CustomMedia) {
+                if (isCustomMedia) {
                     generator.generateLinks(
                         offset = index,
                         clearCache = true,
@@ -1607,10 +1631,20 @@ class ResultViewModel2 : ViewModel() {
                         callback = {},
                         subtitleCallback = {})
                 } else {
+                    // The result page generator prefers completed downloads per episode.
+                    // "Play from source" uses a fresh generator that ignores them.
+                    val playerGenerator = if (playFromSource) {
+                        RepoLinkGenerator(
+                            generator.videos,
+                            page = generator.page,
+                            preferDownloads = false,
+                        )
+                    } else generator
+
                     activity?.navigate(
                         R.id.global_to_navigation_player,
                         GeneratorPlayer.newInstance(
-                            generator, index, list, incognito = isIncognito
+                            playerGenerator, index, list, incognito = isIncognito
                         )
                     )
                 }
@@ -2125,14 +2159,16 @@ class ResultViewModel2 : ViewModel() {
         preferDubStatus = indexer.dubStatus
 
         generator = if (isMovie) {
-            getMovie()?.let { RepoLinkGenerator(listOf(it), page = currentResponse) }
+            getMovie()?.let {
+                RepoLinkGenerator(listOf(it), page = currentResponse, preferDownloads = true)
+            }
         } else {
             val episodes = currentEpisodes.filter { it.key.dubStatus == indexer.dubStatus }
                 .toList()
                 .sortedBy { it.first.season }
                 .flatMap { it.second }
 
-            RepoLinkGenerator(episodes, page = currentResponse)
+            RepoLinkGenerator(episodes, page = currentResponse, preferDownloads = true)
         }
 
         if (isMovie) {
@@ -2591,7 +2627,7 @@ class ResultViewModel2 : ViewModel() {
                     }
                 }
 
-                START_ACTION_LOAD_EP -> {
+                START_ACTION_LOAD_EP, START_ACTION_PLAY_EPISODE_FROM_SOURCE -> {
                     val all = currentEpisodes.values.flatten()
                     val episode =
                         autostart.id?.let { id -> all.firstOrNull { it.id == id } }
@@ -2600,9 +2636,14 @@ class ResultViewModel2 : ViewModel() {
                                     ?: all.firstOrNull { it.episode == ep && it.season == autostart.episode }
                             }
                             ?: return@launchSafe
+                    val action = if (autostart.startAction == START_ACTION_PLAY_EPISODE_FROM_SOURCE) {
+                        ACTION_PLAY_EPISODE_FROM_SOURCE
+                    } else {
+                        getPlayerAction(activity)
+                    }
                     handleAction(
                         EpisodeClickEvent(
-                            getPlayerAction(activity),
+                            action,
                             episode
                         )
                     )

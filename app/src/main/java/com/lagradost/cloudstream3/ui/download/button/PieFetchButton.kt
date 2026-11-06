@@ -195,6 +195,18 @@ open class PieFetchButton(context: Context, attributeSet: AttributeSet) :
                     callback(DownloadClickEvent(DOWNLOAD_ACTION_DOWNLOAD, card))
                 }
             } else {
+                val isDone =
+                    currentMetaData.status == DownloadStatusTell.IsDone ||
+                            (currentMetaData.downloadedLength > 1024 &&
+                                    currentMetaData.downloadedLength + 1024 >= currentMetaData.totalLength)
+
+                // A completed download turns the button into a play button: tapping it
+                // starts the local file directly instead of opening the manage popup.
+                if (isDone) {
+                    callback(DownloadClickEvent(DOWNLOAD_ACTION_PLAY_FILE, card))
+                    return@setOnClickListener
+                }
+
                 val list = arrayListOf(
                     Pair(DOWNLOAD_ACTION_PLAY_FILE, R.string.popup_play_file),
                     Pair(DOWNLOAD_ACTION_DELETE_FILE, R.string.popup_delete_file),

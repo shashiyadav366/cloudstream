@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.ContextCompat.getString
+import androidx.core.net.toUri
 import androidx.navigation.NavOptions
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.actions.temp.CloudStreamPackage
@@ -74,6 +75,14 @@ object OfflinePlaybackHelper {
             playLink(activity, uri.toString())
             return
         }
+        // A file is normally read through a temporary uri grant. Keep that access when the
+        // granting app allows it, so the Continue watching card can replay the file later.
+        runCatching {
+            activity.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
         val name = SafeFile.fromUri(activity, uri)?.name()
         activity.navigate(
             R.id.global_to_navigation_player, GeneratorPlayer.newInstance(
@@ -84,12 +93,29 @@ object OfflinePlaybackHelper {
                             name = name ?: getString(activity, R.string.downloaded_file),
                             // well not the same as a normal id, but we take it as users may want to
                             // play downloaded files and save the location
-                            id = uri.lastPathSegment?.toLongOrNull()?.hashCode() ?: uri.lastPathSegment?.hashCode()
+                            id = uri.lastPathSegment?.toLongOrNull()?.hashCode()
+                                ?: uri.lastPathSegment?.hashCode()
+                                ?: uri.toString().hashCode(),
                         )
                     )
                 ), 0
             ),
             replacePlayerNavOptions
         )
+    }
+
+    /**
+     * Restarts content that belongs to no provider (a file or link played from outside the
+     * app) from the location stored in its Continue watching card.
+     * @return false when the stored location cannot be played.
+     */
+    fun playStandalone(activity: Activity, location: String): Boolean {
+        if (location.isBlank()) return false
+        if (location.startsWith("content://") || location.startsWith("file://")) {
+            playUri(activity, location.toUri())
+        } else {
+            playLink(activity, location)
+        }
+        return true
     }
 }

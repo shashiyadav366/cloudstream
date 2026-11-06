@@ -9,14 +9,17 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.isMovieType
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_ACTION_PLAY_FILE
+import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup.handleDownloadClick
 import com.lagradost.cloudstream3.ui.download.DownloadClickEvent
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
+import com.lagradost.cloudstream3.ui.player.OfflinePlaybackHelper
 import com.lagradost.cloudstream3.ui.player.RepoLinkGenerator
 import com.lagradost.cloudstream3.ui.result.START_ACTION_LOAD_EP
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
 import com.lagradost.cloudstream3.utils.AppContextUtils.loadSearchResult
 import com.lagradost.cloudstream3.utils.DataStoreHelper
+import com.lagradost.cloudstream3.utils.STANDALONE_MEDIA_API_NAME
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 
@@ -33,7 +36,6 @@ object SearchHelper {
      * result page path instead (missing playable data, unknown plugin, or downloads).
      */
     private fun playResumeCardDirectly(card: DataStoreHelper.ResumeWatchingResult): Boolean {
-        val episodeData = card.episodeData?.takeIf { it.isNotBlank() } ?: return false
         val tvType = card.type ?: return false
         if (!tvType.isMovieType() && !tvType.isLiveStream()) return false
         // Live events must open the original card way: load the provider page fresh so the
@@ -41,6 +43,28 @@ object SearchHelper {
         // (e.g. 20+ minutes later) ends in a long load and "no link found". Movies keep
         // the direct path since their data does not expire.
         if (tvType.isLiveStream()) return false
+
+        // A downloaded copy is always preferable to a provider stream.
+        val id = card.id
+        val parentId = card.parentId
+        if (id != null && parentId != null) {
+            val playedDownloaded = DownloadButtonSetup.playDownloadedEpisode(
+                DownloadObjects.DownloadEpisodeCached(
+                    name = card.name,
+                    poster = card.posterUrl,
+                    episode = card.episode ?: 0,
+                    season = card.season,
+                    id = id,
+                    parentId = parentId,
+                    score = card.score,
+                    description = null,
+                    cacheTime = System.currentTimeMillis(),
+                )
+            )
+            if (playedDownloaded) return true
+        }
+
+        val episodeData = card.episodeData?.takeIf { it.isNotBlank() } ?: return false
 
         val generator = RepoLinkGenerator.fromResume(
             episodeData = episodeData,
@@ -53,6 +77,7 @@ object SearchHelper {
             tvType = tvType,
             name = card.name,
             poster = card.posterUrl,
+            preferDownloads = true,
         ) ?: return false
 
         val act = activity as? FragmentActivity ?: return false
@@ -71,6 +96,15 @@ object SearchHelper {
             }
 
             SEARCH_ACTION_PLAY_FILE -> {
+                if (card is DataStoreHelper.ResumeWatchingResult &&
+                    card.apiName == STANDALONE_MEDIA_API_NAME
+                ) {
+                    // Content played from outside the app has no provider page to open:
+                    // restart the stored file/link directly.
+                    val act = activity
+                    if (act != null && OfflinePlaybackHelper.playStandalone(act, card.url)) return
+                }
+
                 if (card is DataStoreHelper.ResumeWatchingResult) {
                     // The entry still knows the plugin's playable data, so open the player
                     // straight away instead of loading the provider page and navigating

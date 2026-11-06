@@ -46,6 +46,7 @@ import com.lagradost.cloudstream3.databinding.FragmentResultSwipeBinding
 import com.lagradost.cloudstream3.databinding.ResultRecommendationsBinding
 import com.lagradost.cloudstream3.databinding.ResultSyncBinding
 import com.lagradost.cloudstream3.databinding.TrailerCustomLayoutBinding
+import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.launchSafe
 import com.lagradost.cloudstream3.mvvm.logError
@@ -818,7 +819,8 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                 resultEpisodeLoading.isVisible = episodes is Resource.Loading
                 resultEpisodes.isVisible = episodes is Resource.Success
                 resultBatchDownloadButton.isVisible =
-                    episodes is Resource.Success && episodes.value.isNotEmpty()
+                    episodes is Resource.Success && episodes.value.isNotEmpty() &&
+                        episodes.value.none { it.tvType.isLiveStream() }
 
                 if (episodes is Resource.Success) {
                     (resultEpisodes.adapter as? EpisodeAdapter)?.submitList(episodes.value)
@@ -875,9 +877,12 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
 
         observeNullable(viewModel.movie) { data ->
             resultBinding?.apply {
-                resultPlayMovie.isVisible = data is Resource.Success
+                val movieEpisode = (data as? Resource.Success)?.value?.second
+                resultPlayMovie.isVisible = movieEpisode != null
                 downloadButton.isVisible =
-                    data is Resource.Success && viewModel.currentRepo?.api?.hasDownloadSupport == true
+                    movieEpisode != null &&
+                        viewModel.currentRepo?.api?.hasDownloadSupport == true &&
+                        !movieEpisode.tvType.isLiveStream()
 
                 (data as? Resource.Success)?.value?.let { (text, ep) ->
                     resultPlayMovie.setText(text)

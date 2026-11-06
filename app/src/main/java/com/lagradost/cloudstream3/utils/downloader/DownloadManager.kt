@@ -811,21 +811,70 @@ object VideoDownloadManager {
             val stopAt = endByte ?: Long.MAX_VALUE
             if (currentByte >= stopAt) return@withContext currentByte
 
+            // Range is inclusive, so [startByte, endByte) is requested as
+            // "bytes=startByte-(endByte - 1)". Sending an open-ended range
+            // ("bytes=startByte-") makes some servers reply 200 with the whole
+            // file instead of 206, which corrupts every chunk after the first
+            // because the body then starts at byte 0, not at startByte.
+            val rangeHeader = if (endByte != null) {
+                "bytes=$startByte-${endByte - 1}"
+            } else {
+                "bytes=$startByte-"
+            }
             val request = app.get(
                 url,
                 headers = headers + mapOf(
-                    // range header is inclusive so [startByte, endByte-1] = [startByte, endByte)
-                    // if nothing at end the server will continue until eof
-                    "Range" to "bytes=$startByte-" // ${endByte?.minus(1)?.toString() ?: "" }
+                    "Range" to rangeHeader
                 ),
                 referer = referer,
                 verify = false
             )
+
+            if (request.code != 200 && request.code != 206) {
+                request.body.close()
+                throw IOException("Unexpected response code ${request.code} for range $rangeHeader")
+            }
+
             val requestStream = request.body.byteStream()
 
             var read: Int
 
             try {
+                // A server may ignore Range and answer 200 with the whole file, or
+                // return a 206 starting earlier than requested. Skip the prefix so
+                // the bytes are written at the correct offset instead of corrupting
+                // the file with a duplicated start.
+                val bodyStart = if (request.code == 206) {
+                    request.headers["Content-Range"]
+                        ?.substringAfter("bytes", "")
+                        ?.trim()
+                        ?.substringBefore("-")
+                        ?.toLongOrNull()
+                        ?: startByte
+                } else {
+                    0L
+                }
+                if (bodyStart > startByte) {
+                    throw IOException("Server returned range starting at $bodyStart, expected $startByte")
+                }
+                var toSkip = startByte - bodyStart
+                while (toSkip > 0) {
+                    val skipped = requestStream.skip(toSkip)
+                    if (skipped > 0) {
+                        toSkip -= skipped
+                    } else {
+                        val skippedByRead = requestStream.read(
+                            buffer,
+                            0,
+                            minOf(bufferSize.toLong(), toSkip).toInt()
+                        )
+                        if (skippedByRead < 0) {
+                            throw IOException("Unexpected EOF while skipping to $startByte")
+                        }
+                        toSkip -= skippedByRead
+                    }
+                }
+
                 while (requestStream.read(buffer, 0, bufferSize).also { read = it } >= 0) {
                     val start = currentByte
                     currentByte += read.toLong()
@@ -1583,6 +1632,13 @@ object VideoDownloadManager {
             logError(e)
             return null
         }
+    }
+
+    /** True when the file exists and has finished writing, with the same 1 KiB padding
+     * used by the download button for servers with an inaccurate content length. */
+    fun isDownloadComplete(context: Context, id: Int): Boolean {
+        val info = getDownloadFileInfo(context, id) ?: return false
+        return info.fileLength > 1024L && info.fileLength + 1024L >= info.totalBytes
     }
 
     fun deleteFilesAndUpdateSettings(

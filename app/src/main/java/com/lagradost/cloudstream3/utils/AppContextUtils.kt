@@ -73,6 +73,7 @@ import com.lagradost.cloudstream3.plugins.RepositoryManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_RESUME_WATCHING
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
 import com.lagradost.cloudstream3.ui.WebviewFragment
+import com.lagradost.cloudstream3.ui.player.OfflinePlaybackHelper
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.ResultFragment
 import com.lagradost.cloudstream3.ui.settings.Globals
@@ -780,6 +781,17 @@ object AppContextUtils {
         startAction: Int = 0,
         startValue: Int? = null,
     ) {
+        // A Continue watching card for content that has no provider (a file or link played
+        // from outside the app) has no result page to load: restart the media itself.
+        val standaloneActivity = this
+        if (standaloneActivity != null &&
+            card is DataStoreHelper.ResumeWatchingResult &&
+            card.apiName == STANDALONE_MEDIA_API_NAME &&
+            OfflinePlaybackHelper.playStandalone(standaloneActivity, card.url)
+        ) {
+            return
+        }
+
         this?.runOnUiThread {
             // viewModelStore.clear()
             this.navigate(

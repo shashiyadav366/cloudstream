@@ -58,6 +58,13 @@ const val RESULT_SUBSCRIBED_STATE_DATA = "result_subscribed_state_data"
 const val RESULT_FAVORITES_STATE_DATA = "result_favorites_state_data"
 const val RESULT_RESUME_WATCHING = "result_resume_watching_2" // Changed due to id changes
 const val RESULT_RESUME_WATCHING_OLD = "result_resume_watching"
+
+/**
+ * [DownloadObjects.DownloadHeaderCached.apiName] of Continue watching entries that belong to
+ * no provider: a file or link that was played from outside the app (file manager, Downloads
+ * app, share sheet). Such a card restarts the same media instead of opening a provider page.
+ */
+const val STANDALONE_MEDIA_API_NAME = "__standalone__"
 const val RESULT_RESUME_WATCHING_HAS_MIGRATED = "result_resume_watching_migrated"
 const val RESULT_EPISODE = "result_episode"
 const val RESULT_SEASON = "result_season"
@@ -844,6 +851,15 @@ object DataStoreHelper {
     ) {
         if (!isWatchHistoryEnabled()) return
 
+        // Content opened from outside the app (a downloaded file picked in a file manager,
+        // a uri sent by another app) has no provider, no parent result and no episode list.
+        // Track it as its own Continue watching card, keyed by the playback id, exactly like
+        // an in-app movie: it is dropped again once it has been watched to the end.
+        if (currentEpisode is ExtractorUri && currentEpisode.parentId == null) {
+            setStandalonePosAndResume(id, position, duration, currentEpisode)
+            return
+        }
+
         // Live streams have no meaningful resume position. Keep the entry while the original
         // plugin still has the card it was saved from (HomeViewModel drops the entry once the
         // plugin does not have it anymore). Refresh its timestamp on every playback update so
@@ -929,6 +945,67 @@ object DataStoreHelper {
                 }
             }
         }
+    }
+
+    /**
+     * Watch progress and Continue watching entry for media that has no provider result.
+     * [meta] is the local file/uri that is playing, [id] the playback id used for progress.
+     */
+    private fun setStandalonePosAndResume(
+        id: Int?,
+        position: Long,
+        duration: Long,
+        meta: ExtractorUri,
+    ) {
+        val uri = meta.uri.toString()
+        if (uri.isBlank() || uri == "null") return
+        // The playback id is derived from the uri, so it is stable across reopens. Fall back
+        // to the uri hash for files whose last path segment cannot be turned into an id.
+        val mediaId = id ?: meta.id ?: uri.hashCode()
+
+        setViewPos(mediaId, position, duration)
+
+        if (duration <= 0L) return
+        val percentage = position * 100L / duration
+        if (percentage >= NEXT_WATCH_EPISODE_PERCENTAGE) {
+            // Fully watched: remove the card and forget the position so that playing the
+            // file again starts from the beginning instead of resuming at the very end.
+            removeLastWatched(mediaId)
+            removeViewPos(mediaId)
+            return
+        }
+
+        // The card is rendered from this cached header, the same way provider entries are.
+        // The media id is derived from the file, so it could in theory collide with a
+        // provider result id; never take over a card that belongs to a provider.
+        val headerKey = headerCacheKey(mediaId, null)
+        val existingHeader =
+            getKey<DownloadObjects.DownloadHeaderCached>(DOWNLOAD_HEADER_CACHE, headerKey)
+                ?: getKey(DOWNLOAD_HEADER_CACHE_BACKUP, headerKey)
+        if (existingHeader != null && existingHeader.apiName != STANDALONE_MEDIA_API_NAME) return
+        if (existingHeader == null) {
+            setKey(
+                DOWNLOAD_HEADER_CACHE,
+                headerKey,
+                DownloadObjects.DownloadHeaderCached(
+                    apiName = STANDALONE_MEDIA_API_NAME,
+                    url = uri,
+                    type = meta.tvType ?: TvType.Movie,
+                    name = meta.name,
+                    poster = null,
+                    cacheTime = System.currentTimeMillis(),
+                    id = mediaId,
+                )
+            )
+        }
+
+        setLastWatched(
+            parentId = mediaId,
+            episodeId = mediaId,
+            episode = null,
+            season = null,
+            isFromDownload = false,
+        )
     }
 
     fun getViewPos(id: Int?, sourcePlugin: String? = null): PosDur? {

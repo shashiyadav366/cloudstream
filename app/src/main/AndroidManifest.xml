@@ -117,6 +117,7 @@
 
                 <data android:scheme="content" />
                 <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
             </intent-filter>
 
             <!-- I dont think this label can be translated, but idk -->

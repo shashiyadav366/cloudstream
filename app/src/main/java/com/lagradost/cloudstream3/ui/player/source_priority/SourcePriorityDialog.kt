@@ -23,7 +23,14 @@ class SourcePriorityDialog(
      **/
     private val updatedCallback: () -> Unit
 ) : Dialog(ctx, themeRes) {
+    private var isInitialized = false
+
     override fun show() {
+        if (isInitialized) {
+            super.show()
+            return
+        }
+        isInitialized = true
         val binding =
             PlayerSelectSourcePriorityBinding.inflate(LayoutInflater.from(ctx), null, false)
         setContentView(binding.root)
@@ -98,7 +105,12 @@ class SourcePriorityDialog(
             }
 
             settingsBtt.setOnClickListener {
-                SourceProfileSettingsDialog(ctx, themeRes, profile.id).show()
+                val settingsDialog = SourceProfileSettingsDialog(ctx, themeRes, profile.id)
+                settingsDialog.setOnDismissListener {
+                    this@SourcePriorityDialog.show()
+                }
+                this@SourcePriorityDialog.hide()
+                settingsDialog.show()
             }
         }
         super.show()

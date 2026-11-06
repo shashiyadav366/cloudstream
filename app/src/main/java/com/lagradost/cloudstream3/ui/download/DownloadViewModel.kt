@@ -224,7 +224,13 @@ class DownloadViewModel : ViewModel() {
                 .mapNotNull { key ->
                     context.getKey<DownloadObjects.DownloadHeaderCached>(key)?.let { key to it }
                 }
+            // The downloader stores a header under the plain result id, while playing or
+            // opening the same title stores one under "<id>|<pluginScope>". Both describe
+            // the same download, so keep only the most recently cached entry to avoid
+            // showing the same downloaded video twice.
             val cached = headerKeys.map { it.second }
+                .groupBy { it.id }
+                .mapNotNull { (_, headers) -> headers.maxByOrNull { it.cacheTime } }
 
             // Download stats and header keys may change when downloading.
             // To prevent the downloader and key removal from colliding, simply do not prune keys when downloading.

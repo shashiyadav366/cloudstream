@@ -28,6 +28,9 @@ import kotlinx.serialization.Serializable
 const val START_ACTION_RESUME_LATEST = 1
 const val START_ACTION_LOAD_EP = 2
 
+/** Load the result page and play the requested episode while bypassing local downloads. */
+const val START_ACTION_PLAY_EPISODE_FROM_SOURCE = 3
+
 /**
  * Future proofed way to mark episodes as watched
  **/

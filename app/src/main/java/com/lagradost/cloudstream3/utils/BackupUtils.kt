@@ -217,11 +217,27 @@ object BackupUtils {
             .mapNotNull { it.substringAfterLast('/').takeIf(String::isNotBlank) }
             .toSet()
 
+        // Local audio/video files only exist on this device, so their Continue Watching
+        // entry, cached header and saved position must not travel with a backup.
+        val standaloneSuffixes = resumeSuffixes.filterTo(mutableSetOf()) { suffix ->
+            val header = context.getKey<DownloadObjects.DownloadHeaderCached>(
+                DOWNLOAD_HEADER_CACHE, suffix
+            ) ?: context.getKey<DownloadObjects.DownloadHeaderCached>(
+                DOWNLOAD_HEADER_CACHE_BACKUP, suffix
+            )
+            header?.apiName == STANDALONE_MEDIA_API_NAME
+        }
+
         val allData = dataPrefs.filter { (key, _) ->
-            if (key.isHeaderCacheKey()) {
-                key.substringAfterLast('/') in resumeSuffixes
-            } else {
-                key.isTransferable() || key in mustBackupKeys
+            val suffix = key.substringAfterLast('/')
+            when {
+                key.isHeaderCacheKey() ->
+                    suffix in resumeSuffixes && suffix !in standaloneSuffixes
+                key.contains("/$RESULT_RESUME_WATCHING/") ->
+                    suffix !in standaloneSuffixes
+                key.contains("/$VIDEO_POS_DUR/") ->
+                    suffix !in standaloneSuffixes
+                else -> key.isTransferable() || key in mustBackupKeys
             }
         }
         val allSettings = context.getDefaultSharedPrefs().all.filter {

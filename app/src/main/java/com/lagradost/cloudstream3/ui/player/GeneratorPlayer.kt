@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerNotificationManager
 import androidx.media3.ui.PlayerNotificationManager.EXTRA_INSTANCE_ID
 import androidx.media3.ui.PlayerNotificationManager.MediaDescriptionAdapter
+import androidx.navigation.NavOptions
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -70,6 +71,7 @@ import com.lagradost.cloudstream3.databinding.FragmentPlayerBinding
 import com.lagradost.cloudstream3.databinding.PlayerSelectSourceAndSubsBinding
 import com.lagradost.cloudstream3.databinding.PlayerSelectTracksBinding
 import com.lagradost.cloudstream3.isAnimeOp
+import com.lagradost.cloudstream3.isAudioType
 import com.lagradost.cloudstream3.isEpisodeBased
 import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.isMovieType
@@ -98,6 +100,7 @@ import com.lagradost.cloudstream3.ui.result.ResultEpisode
 import com.lagradost.cloudstream3.ui.result.ResultFragment
 import com.lagradost.cloudstream3.ui.result.ResultFragment.bindLogo
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
+import com.lagradost.cloudstream3.ui.result.START_ACTION_PLAY_EPISODE_FROM_SOURCE
 import com.lagradost.cloudstream3.ui.result.SyncViewModel
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
@@ -129,6 +132,7 @@ import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 import com.lagradost.cloudstream3.utils.UIHelper.hideProgress
 import com.lagradost.cloudstream3.utils.UIHelper.hideSystemUI
+import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.UIHelper.popCurrentPage
 import com.lagradost.cloudstream3.utils.UIHelper.showProgress
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
@@ -198,6 +202,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var currentSelectedLink: Pair<ExtractorLink?, ExtractorUri?>? = null
     /** In-flight re-resolution of an expired authorized stream; cancelled in onDestroy. */
     private var streamRenewalJob: Job? = null
+    /** One provider fallback per offline playback attempt, so a broken file cannot loop. */
+    private var offlineFallbackAttempted = false
     /** Bounds how often automatic re-resolution may start (no error/renewal loops). */
     private val streamRenewalBudget = StreamRenewalBudget()
     /** Exponential-backoff re-prepare budget for transient playback errors (reference-player tier 1). */
@@ -608,6 +614,10 @@ class GeneratorPlayer : FullScreenPlayer() {
         // uiReset() // Removed due to UX
 
         currentSelectedLink = link
+        // A new episode or a switch back to an online link is a fresh playback attempt.
+        if (!sameEpisode || link.first != null) {
+            offlineFallbackAttempted = false
+        }
         //  setEpisodes(viewModel.getAllMeta() ?: emptyList())
         setPlayerDimen(null)
         setTitle()
@@ -617,6 +627,15 @@ class GeneratorPlayer : FullScreenPlayer() {
         }
 
         loadExtractorJob(link.first)
+        // Audio content (music, audiobooks, podcasts, audio files) always plays at 1x and
+        // never remembers a playback speed, just like live streams.
+        player.setAudioOnlyStream(
+            when (val meta = currentMeta) {
+                is ResultEpisode -> meta.tvType.isAudioType()
+                is ExtractorUri -> meta.tvType?.isAudioType() == true
+                else -> false
+            }
+        )
         // load player
         context?.let { ctx ->
             val (url, uri) = link
@@ -1115,9 +1134,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     override fun showMirrorsDialogue() {
         try {
             // Only one control at a time: the newest one wins.
-            toggleEpisodesOverlay(false)
-            toggleTracksOverlay(false)
-            closePlayerDialogs()
+            hideControlsForDialog()
 
             currentSelectedSubtitles = player.getCurrentPreferredSubtitle()
             //println("CURRENT SELECTED :$currentSelectedSubtitles of $currentSubs")
@@ -1148,8 +1165,6 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
                 subtitleList.addFooterView(loadFromFileFooter)
 
-                var shouldDismiss = true
-
                 binding.subtitleSettingsBtt.setOnClickListener {
                     safe {
                         val subtitlesFragment = SubtitlesFragmentDialog2()
@@ -1173,10 +1188,11 @@ class GeneratorPlayer : FullScreenPlayer() {
                         ctx.getString(R.string.player_load_subtitles_online)
 
                     loadFromOpenSubsFooter.setOnClickListener {
-                        shouldDismiss = false
-                        sourceDialog.dismissSafe(activity)
-                        selectSourceDialog = null
+                        sourceDialog.hide()
                         openOnlineSubPicker(it.context, currentLoadResponse) {
+                            if (activity?.isFinishing == false && activity?.isDestroyed == false) {
+                                sourceDialog.show()
+                            }
                             dismiss()
                         }
                     }
@@ -1292,8 +1308,9 @@ class GeneratorPlayer : FullScreenPlayer() {
                 refreshLinks(currentQualityProfile)
 
                 sourceDialog.setOnDismissListener {
-                    if (shouldDismiss) dismiss()
+                    dismiss()
                     selectSourceDialog = null
+                    restorePlayerControlsAfterDialog()
                 }
 
 
@@ -1435,8 +1452,12 @@ class GeneratorPlayer : FullScreenPlayer() {
                     dialog.setOnDismissListener {
                         viewModel.state.clearSortedLinksCache()
                         refreshLinks(currentQualityProfile)
+                        if (activity?.isFinishing == false && activity?.isDestroyed == false) {
+                            sourceDialog.show()
+                        }
                     }
 
+                    sourceDialog.hide()
                     dialog.show()
                 }
 
@@ -1463,9 +1484,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                         ctx.getString(R.string.subtitles_encoding_key), null
                     )
 
-                    shouldDismiss = false
-                    sourceDialog.dismissSafe(activity)
-                    selectSourceDialog = null
+                    sourceDialog.hide()
 
                     val index = prefValues.indexOf(currentPrefMedia)
                     activity?.showDialog(
@@ -1473,7 +1492,11 @@ class GeneratorPlayer : FullScreenPlayer() {
                         if (index == -1) 0 else index,
                         ctx.getString(R.string.subtitles_encoding),
                         true,
-                        {}) {
+                        {
+                            if (activity?.isFinishing == false && activity?.isDestroyed == false) {
+                                sourceDialog.show()
+                            }
+                        }) {
                         settingsManager.edit {
                             putString(
                                 ctx.getString(R.string.subtitles_encoding_key), prefValues[it]
@@ -1545,6 +1568,8 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     override fun showTracksDialogue() {
         try {
+            // Only one control at a time: the newest one wins.
+            hideControlsForDialog()
             //println("CURRENT SELECTED :$currentSelectedSubtitles of $currentSubs")
             context?.let { ctx ->
                 val tracks = player.getVideoTracks()
@@ -1602,7 +1627,8 @@ class GeneratorPlayer : FullScreenPlayer() {
 
                 trackDialog.setOnDismissListener {
                     dismiss()
-                    // selectTracksDialog = null
+                    selectTrackDialog = null
+                    restorePlayerControlsAfterDialog()
                 }
 
                 var audioIndexStart = currentAudioTracks.indexOfFirst { track ->
@@ -1834,6 +1860,25 @@ class GeneratorPlayer : FullScreenPlayer() {
     override fun playerError(exception: Throwable) {
         val errorKind = StreamPlaybackErrors.classify(exception)
         val activeLink = currentSelectedLink?.first
+        val offlineLink = currentSelectedLink?.takeIf { it.first == null && it.second != null }
+
+        // A downloaded file can be missing or corrupt even though the completion check
+        // passed. Try the provider once instead of retrying the broken local file.
+        if (offlineLink != null && errorKind != StreamErrorKind.Cancelled) {
+            if (streamRenewalJob?.isActive == true) {
+                Log.i(TAG, "playerError: offline fallback already running, ignoring")
+                return
+            }
+            if (!offlineFallbackAttempted) {
+                offlineFallbackAttempted = true
+                Log.i(TAG, "playerError: offline playback failed, trying provider fallback")
+                startOfflineFallback(offlineLink, exception)
+                return
+            }
+            Log.i(TAG, "playerError: offline fallback already attempted, surfacing error")
+            handlePlayerError(exception)
+            return
+        }
 
         if (activeLink != null && errorKind == StreamErrorKind.AuthorizationExpired) {
             // The authorization on this stream URL ran out: re-resolve the stream through
@@ -1927,6 +1972,97 @@ class GeneratorPlayer : FullScreenPlayer() {
                 loadLink(freshPair, sameEpisode = true)
             }
         }
+    }
+
+    /**
+     * Re-resolves the current episode through the provider when a downloaded file cannot be
+     * played. If the current generator only knows about local files, the result page is
+     * opened and the episode is auto-started from source instead.
+     */
+    private fun startOfflineFallback(previousLink: VideoLink, error: Throwable) {
+        streamRenewalJob = ioSafe {
+            val freshLink = try {
+                viewModel.regenerateLinks().firstOrNull()
+            } catch (t: Throwable) {
+                logError(t)
+                null
+            }
+
+            if (!isAdded) return@ioSafe
+
+            if (freshLink == null) {
+                Log.i(TAG, "offline fallback found no provider link, opening result page")
+                runOnMainThread {
+                    if (isAdded) openResultPageForOfflineFallback(error)
+                }
+                return@ioSafe
+            }
+
+            Log.i(
+                TAG,
+                "offline fallback resolved a provider link, reloading " +
+                        "target=${StreamRequestContext.safeTarget(freshLink.url)}"
+            )
+
+            runOnMainThread {
+                if (!isAdded) return@runOnMainThread
+                // The user may have switched links while we were regenerating.
+                if (currentSelectedLink !== previousLink) {
+                    Log.i(TAG, "offline fallback finished but the link changed, discarding")
+                    return@runOnMainThread
+                }
+
+                val freshPair: VideoLink = freshLink to null
+                viewModel.modifyState { addError(previousLink) }
+                viewModel.modifyState { add(freshPair) }
+                loadLink(freshPair, sameEpisode = true)
+            }
+        }
+    }
+
+    /**
+     * Opens the provider result page for a download-only playback and starts the episode
+     * with "Play from source", bypassing the broken local file.
+     */
+    private fun openResultPageForOfflineFallback(error: Throwable) {
+        val meta = currentMeta as? ExtractorUri
+        val act = activity
+        val header = meta?.parentId?.let { DownloadButtonSetup.getDownloadHeader(it) }
+
+        if (meta?.id == null || meta.parentId == null || header == null || act == null) {
+            Log.i(TAG, "offline fallback could not open the result page, surfacing original error")
+            handlePlayerError(error)
+            return
+        }
+
+        Log.i(TAG, "offline fallback opening result page for provider playback")
+        val card = DataStoreHelper.ResumeWatchingResult(
+            name = header.name,
+            url = header.url,
+            apiName = header.apiName,
+            type = header.type,
+            posterUrl = header.poster,
+            watchPos = null,
+            id = meta.id,
+            parentId = meta.parentId,
+            episode = meta.episode,
+            season = meta.season,
+            isFromDownload = true,
+            updateTime = System.currentTimeMillis(),
+        )
+        val resultsId = if (isLayout(TV or EMULATOR)) {
+            R.id.global_to_navigation_results_tv
+        } else {
+            R.id.global_to_navigation_results_phone
+        }
+        val navOptions = NavOptions.Builder()
+            .setPopUpTo(R.id.navigation_player, inclusive = true, saveState = false)
+            .build()
+        act.navigate(
+            resultsId,
+            ResultFragment.newInstance(card, START_ACTION_PLAY_EPISODE_FROM_SOURCE, meta.id),
+            navOptions,
+        )
     }
 
     /** The original error handling path: mark the link errored, log, surface to the UI. */

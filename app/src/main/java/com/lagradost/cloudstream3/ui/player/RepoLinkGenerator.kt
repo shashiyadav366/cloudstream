@@ -1,10 +1,14 @@
 package com.lagradost.cloudstream3.ui.player
 
+import android.net.Uri
 import android.util.Log
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
 import com.lagradost.cloudstream3.APIHolder.getApiFromSourceAndNameNull
 import com.lagradost.cloudstream3.APIHolder.unixTime
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.ui.APIRepository
@@ -13,6 +17,8 @@ import com.lagradost.cloudstream3.ui.result.VideoWatchState
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
+import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -28,6 +34,8 @@ data class Cache(
 class RepoLinkGenerator(
     episodes: List<ResultEpisode>,
     val page: LoadResponse? = null,
+    /** When true, a completed local download is played instead of resolving provider links. */
+    private val preferDownloads: Boolean = false,
 ) : VideoGenerator<ResultEpisode>(episodes) {
     companion object {
         const val TAG = "RepoLink"
@@ -52,6 +60,7 @@ class RepoLinkGenerator(
             tvType: TvType,
             name: String?,
             poster: String?,
+            preferDownloads: Boolean = false,
         ): RepoLinkGenerator? {
             if (episodeData.isBlank() || parentId == null) return null
             if (getApiFromSourceAndNameNull(apiName, sourcePlugin) == null &&
@@ -83,13 +92,37 @@ class RepoLinkGenerator(
                 sourcePlugin = sourcePlugin,
             )
 
-            return RepoLinkGenerator(listOf(entry), page = null)
+            return RepoLinkGenerator(listOf(entry), page = null, preferDownloads = preferDownloads)
         }
     }
 
     override val hasCache = true
     override val canSkipLoading = true
     override fun getId(index: Int): Int? = videos.getOrNull(index)?.id
+
+    private fun getDownloadedExtractorUri(current: ResultEpisode): ExtractorUri? {
+        val ctx = context ?: return null
+        if (!VideoDownloadManager.isDownloadComplete(ctx, current.id)) return null
+        val info = getKey<DownloadObjects.DownloadedFileInfo>(
+            VideoDownloadManager.KEY_DOWNLOAD_INFO,
+            current.id.toString()
+        ) ?: return null
+
+        return ExtractorUri(
+            // Kept empty so DownloadFileGenerator resolves it only when playback starts.
+            uri = Uri.EMPTY,
+            id = current.id,
+            parentId = current.parentId,
+            name = current.name ?: ctx.getString(R.string.downloaded_file),
+            season = current.season,
+            episode = current.episode,
+            headerName = current.headerName,
+            tvType = current.tvType,
+            basePath = info.basePath,
+            displayName = info.displayName,
+            relativePath = info.relativePath,
+        )
+    }
 
     // this is a simple array that is used to instantly load links if they are already loaded
     //var linkCache = Array<Set<ExtractorLink>>(size = episodes.size, init = { setOf() })
@@ -105,6 +138,33 @@ class RepoLinkGenerator(
         isCasting: Boolean,
     ): Boolean {
         val current = videos.getOrNull(offset) ?: return false
+
+        // Live links are short-lived and can point at a session that has already moved
+        // on. Continue Watching reuses the same episode id, so a cached link from an
+        // earlier play can otherwise be handed to the player even though the provider
+        // would return a fresh working URL. Always resolve live links again, just like
+        // opening the card from its provider; static media keeps the 20-minute cache.
+        // The page type is checked as well: some live-event providers do not tag every
+        // episode with TvType.Live, and their links expire just the same.
+        val isLive = current.tvType.isLiveStream() || page?.type?.isLiveStream() == true
+
+        // A downloaded copy is always preferable to a provider stream, unless the caller
+        // explicitly wants fresh links (stream renewal or "Play from source") or the
+        // content is live: a downloaded live stream is only a stale snapshot, not a DVR.
+        if (preferDownloads && !clearCache && !isLive && sourceTypes.contains(ExtractorLinkType.VIDEO)) {
+            val local = getDownloadedExtractorUri(current)
+            if (local != null) {
+                DownloadFileGenerator(listOf(local)).generateLinks(
+                    clearCache = false,
+                    sourceTypes = sourceTypes,
+                    callback = callback,
+                    subtitleCallback = subtitleCallback,
+                    offset = 0,
+                    isCasting = isCasting,
+                )
+                return true
+            }
+        }
 
         // Two plugins can expose the same provider name and result id; include the
         // plugin so their link caches never leak into each other.
@@ -128,14 +188,6 @@ class RepoLinkGenerator(
         val lastCountedSuffix = ConcurrentHashMap<String, AtomicInteger>()
 
         synchronized(currentCache) {
-            // Live links are short-lived and can point at a session that has already moved
-            // on. Continue Watching reuses the same episode id, so a cached link from an
-            // earlier play can otherwise be handed to the player even though the provider
-            // would return a fresh working URL. Always resolve live links again, just like
-            // opening the card from its provider; static media keeps the 20-minute cache.
-            // The page type is checked as well: some live-event providers do not tag every
-            // episode with TvType.Live, and their links expire just the same.
-            val isLive = current.tvType.isLiveStream() || page?.type?.isLiveStream() == true
             val outdatedCache = isLive ||
                 unixTime - currentCache.lastCachedTimestamp > 60 * 20 // 20 minutes
 
