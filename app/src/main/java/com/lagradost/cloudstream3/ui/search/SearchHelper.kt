@@ -44,28 +44,11 @@ object SearchHelper {
         // the direct path since their data does not expire.
         if (tvType.isLiveStream()) return false
 
-        // A downloaded copy is always preferable to a provider stream.
-        val id = card.id
-        val parentId = card.parentId
-        if (id != null && parentId != null) {
-            val playedDownloaded = DownloadButtonSetup.playDownloadedEpisode(
-                DownloadObjects.DownloadEpisodeCached(
-                    name = card.name,
-                    poster = card.posterUrl,
-                    episode = card.episode ?: 0,
-                    season = card.season,
-                    id = id,
-                    parentId = parentId,
-                    score = card.score,
-                    description = null,
-                    cacheTime = System.currentTimeMillis(),
-                )
-            )
-            if (playedDownloaded) return true
-        }
-
         val episodeData = card.episodeData?.takeIf { it.isNotBlank() } ?: return false
 
+        // Keep source tracking consistent with online playback. RepoLinkGenerator can serve
+        // a completed local download when preferDownloads is true, while preserving the same
+        // plugin-scoped continue watching/progress state.
         val generator = RepoLinkGenerator.fromResume(
             episodeData = episodeData,
             apiName = card.apiName,
@@ -133,6 +116,7 @@ object SearchHelper {
                                         score = null,
                                         description = null,
                                         cacheTime = System.currentTimeMillis(),
+                                        sourcePlugin = card.sourcePlugin,
                                     )
                                 )
                             )

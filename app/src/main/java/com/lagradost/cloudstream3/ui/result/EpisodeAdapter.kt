@@ -172,6 +172,7 @@ class EpisodeAdapter(
                             score = item.score,
                             description = item.description,
                             cacheTime = System.currentTimeMillis(),
+                            sourcePlugin = item.sourcePlugin,
                         ), null
                     ) {
                         when (it.action) {
@@ -393,6 +394,7 @@ class EpisodeAdapter(
                             score = item.score,
                             description = item.description,
                             cacheTime = System.currentTimeMillis(),
+                            sourcePlugin = item.sourcePlugin,
                         ), null
                     ) {
                         when (it.action) {

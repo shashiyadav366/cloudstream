@@ -200,10 +200,11 @@ open class PieFetchButton(context: Context, attributeSet: AttributeSet) :
                             (currentMetaData.downloadedLength > 1024 &&
                                     currentMetaData.downloadedLength + 1024 >= currentMetaData.totalLength)
 
-                // A completed download turns the button into a play button: tapping it
-                // starts the local file directly instead of opening the manage popup.
+                // A completed download no longer gets its own playback path: the main
+                // Play button already prefers the completed file. Tapping here only
+                // manages/removes the downloaded file.
                 if (isDone) {
-                    callback(DownloadClickEvent(DOWNLOAD_ACTION_PLAY_FILE, card))
+                    callback(DownloadClickEvent(DOWNLOAD_ACTION_DELETE_FILE, card))
                     return@setOnClickListener
                 }
 

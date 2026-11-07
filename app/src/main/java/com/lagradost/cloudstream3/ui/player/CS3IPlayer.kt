@@ -140,6 +140,7 @@ const val toleranceAfterUs = 300_000L
 @OptIn(UnstableApi::class)
 class CS3IPlayer : IPlayer {
     private var playerListener: Player.Listener? = null
+    private var offlineResumeListener: Player.Listener? = null
     private var isPlaying = false
     private var exoPlayer: ExoPlayer? = null
         set(value) {
@@ -705,6 +706,10 @@ class CS3IPlayer : IPlayer {
             } catch (t: Throwable) {
                 // No documented exception, but just to be extra safe
                 logError(t)
+            }
+            offlineResumeListener?.let {
+                removeListener(it)
+                offlineResumeListener = null
             }
             playerListener?.let {
                 removeListener(it)
@@ -1652,24 +1657,103 @@ return exoPlayerBuilder.build().apply {
             )
 
             event(PlayerAttachedEvent(exoPlayer))
-            exoPlayer?.prepare()
 
             // For offline fragmented MP4s, FLAG_MERGE_FRAGMENTED_SIDX builds the SIDX seek map
-            // incrementally as data is buffered. The initial seek resolves to the nearest merged
-            // entry (~first fragment, 3 s). On STATE_READY, re-seek to the actual saved position.
-            // This may only be reproducible on large and fairly long fragmented MP4 files with
-            // multiple sidx boxes.
-            if (onlineSource == null && playbackPosition > (exoPlayer?.duration ?: 0L)) {
-                exoPlayer?.addListener(object : Player.Listener {
-                    private var seekApplied = false
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (seekApplied || playbackState != Player.STATE_READY) return
-                        seekApplied = true
-                        exoPlayer?.seekTo(currentWindow, playbackPosition)
-                        exoPlayer?.removeListener(this)
-                    }
-                })
+            // incrementally as data is buffered. The initial seek may resolve before the full
+            // seek map/duration is known. Re-apply saved position once the item is ready and
+            // seekable, but never seek if it would be a no-op/invalid position.
+            offlineResumeListener?.let { listener ->
+                exoPlayer?.removeListener(listener)
+                offlineResumeListener = null
             }
+            val resumePlayerInstance = exoPlayer
+            if (onlineSource == null && playbackPosition > 0L && resumePlayerInstance != null) {
+                val resumeTarget = playbackPosition
+                val resumeWindow = currentWindow
+                offlineResumeListener = object : Player.Listener {
+                    private var seekApplied = false
+                    private var removed = false
+
+                    private fun isCurrentListener(): Boolean =
+                        offlineResumeListener === this
+
+                    private fun removeFromOwningPlayer() {
+                        if (removed) return
+                        removed = true
+                        seekApplied = true
+                        if (isCurrentListener()) {
+                            offlineResumeListener = null
+                        }
+                        runCatching { resumePlayerInstance.removeListener(this) }
+                    }
+
+                    private fun tryApplySeek(): Boolean {
+                        if (seekApplied || removed) return true
+                        if (!isCurrentListener() || exoPlayer !== resumePlayerInstance) {
+                            removeFromOwningPlayer()
+                            return true
+                        }
+                        val player = resumePlayerInstance
+                        if (resumeTarget <= 0L) {
+                            removeFromOwningPlayer()
+                            return true
+                        }
+                        val duration = player.duration
+                        val clampedTarget = if (duration > 0L && duration != TIME_UNSET) {
+                            minOf(resumeTarget, (duration - 500L).coerceAtLeast(0L))
+                        } else resumeTarget
+                        val current = player.currentPosition
+                        val needsSeek = !player.isCurrentMediaItemSeekable || kotlin.math.abs(current - clampedTarget) > 1500L
+                        if (!needsSeek) {
+                            removeFromOwningPlayer()
+                            return true
+                        }
+                        if (!player.isCurrentMediaItemSeekable) return false
+                        val timeline = player.currentTimeline
+                        val windowIndex = when {
+                            !timeline.isEmpty && resumeWindow in 0 until timeline.windowCount -> resumeWindow
+                            !timeline.isEmpty -> player.currentMediaItemIndex.coerceIn(0, timeline.windowCount - 1)
+                            else -> return false
+                        }
+                        timeline.getWindow(windowIndex, Timeline.Window())
+                        seekApplied = true
+                        player.seekTo(windowIndex, clampedTarget)
+                        removeFromOwningPlayer()
+                        return true
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (!isCurrentListener() || exoPlayer !== resumePlayerInstance) {
+                            removeFromOwningPlayer()
+                            return
+                        }
+                        if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                            removeFromOwningPlayer()
+                            return
+                        }
+                        if (playbackState != Player.STATE_READY) return
+                        tryApplySeek()
+                    }
+
+                    override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                        if (!isCurrentListener() || exoPlayer !== resumePlayerInstance) {
+                            removeFromOwningPlayer()
+                            return
+                        }
+                        if (resumePlayerInstance.playbackState == Player.STATE_READY) {
+                            tryApplySeek()
+                        }
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        removeFromOwningPlayer()
+                    }
+                }.also { listener ->
+                    resumePlayerInstance.addListener(listener)
+                }
+            }
+
+            exoPlayer?.prepare()
 
             exoPlayer?.let { exo ->
                 event(StatusEvent(CSPlayerLoading.IsBuffering, CSPlayerLoading.IsBuffering))

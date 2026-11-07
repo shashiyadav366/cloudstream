@@ -499,6 +499,7 @@ class ResultViewModel2 : ViewModel() {
                 poster = response.posterUrl,
                 id = id,
                 cacheTime = System.currentTimeMillis(),
+                sourcePlugin = sourcePlugin,
             )
         )
         DataStoreHelper.setLastWatched(
@@ -813,6 +814,7 @@ class ResultViewModel2 : ViewModel() {
             if (currentIsMovie) null else episode.season,
             if (currentIsMovie) null else episode.episode,
             tvType,
+            episode.sourcePlugin,
         )
     }
 
@@ -1487,6 +1489,7 @@ class ResultViewModel2 : ViewModel() {
                             poster = response.posterUrl,
                             id = click.data.parentId,
                             cacheTime = System.currentTimeMillis(),
+                            sourcePlugin = sourcePlugin,
                         )
                     )
                 }
@@ -2690,6 +2693,7 @@ class ResultViewModel2 : ViewModel() {
                             poster = loadResponse.posterUrl,
                             id = mainId,
                             cacheTime = System.currentTimeMillis(),
+                            sourcePlugin = currentSourcePlugin,
                         )
                     )
                     if (loadTrailers)

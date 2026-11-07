@@ -26,6 +26,12 @@ data class ExtractorUri(
     val season: Int? = null,
     val headerName: String? = null,
     val tvType: TvType? = null,
+    /**
+     * Plugin that owns this media when it comes from a provider/download. Used to keep
+     * watch progress and Continue Watching on the same tracker as online playback from the
+     * same source.
+     */
+    val sourcePlugin: String? = null,
 )
 
 /**

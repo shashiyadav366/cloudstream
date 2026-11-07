@@ -83,6 +83,12 @@ object DownloadObjects {
         @JsonProperty("description") @SerialName("description") val description: String?,
         @JsonProperty("cacheTime") @SerialName("cacheTime") val cacheTime: Long,
         @JsonProperty("id") @SerialName("id") override val id: Int,
+        /**
+         * Plugin that owns this download's provider/source. Used to keep Continue
+         * Watching and progress aligned with online playback from the same source.
+         * Null for legacy downloads.
+         */
+        @JsonProperty("sourcePlugin") @SerialName("sourcePlugin") val sourcePlugin: String? = null,
     ) : DownloadCached {
         object Serializer : WriteOnlySerializer<DownloadEpisodeCached>(
             DownloadEpisodeCached.generatedSerializer(),
@@ -115,6 +121,11 @@ object DownloadObjects {
         @JsonProperty("poster") @SerialName("poster") val poster: String?,
         @JsonProperty("cacheTime") @SerialName("cacheTime") val cacheTime: Long,
         @JsonProperty("id") @SerialName("id") override val id: Int,
+        /**
+         * Plugin that owns this downloaded title's provider/source. Used to scope
+         * cached headers per provider identity when available. Null for legacy downloads.
+         */
+        @JsonProperty("sourcePlugin") @SerialName("sourcePlugin") val sourcePlugin: String? = null,
     ) : DownloadCached
 
     @Serializable
@@ -148,6 +159,12 @@ object DownloadObjects {
         @JsonProperty("season") @SerialName("season") val season: Int?,
         @JsonProperty("episode") @SerialName("episode") val episode: Int?,
         @JsonProperty("type") @SerialName("type") val type: TvType?,
+        /**
+         * Plugin that owns this downloaded episode's provider/source. Used to keep
+         * Continue Watching/progress aligned with online playback from the same source.
+         * Null for legacy downloads.
+         */
+        @JsonProperty("sourcePlugin") @SerialName("sourcePlugin") val sourcePlugin: String? = null,
     )
 
     @Serializable

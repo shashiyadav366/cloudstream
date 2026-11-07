@@ -801,6 +801,13 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
 
                 (data as? Resource.Success)?.value?.let { (text, ep) ->
                     resultPlayMovie.setText(text)
+                    resultPlayMovie.setIconResource(
+                        if (DownloadButtonSetup.isDownloadComplete(requireContext(), ep.id)) {
+                            R.drawable.download_icon_done
+                        } else {
+                            R.drawable.ic_baseline_play_arrow_24
+                        }
+                    )
                     resultPlayMovie.setOnClickListener {
                         viewModel.handleAction(
                             EpisodeClickEvent(ACTION_CLICK_DEFAULT, ep)
@@ -832,6 +839,7 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                             score = ep.score,
                             description = ep.description,
                             cacheTime = System.currentTimeMillis(),
+                            sourcePlugin = ep.sourcePlugin,
                         ),
                         null
                     ) { click ->

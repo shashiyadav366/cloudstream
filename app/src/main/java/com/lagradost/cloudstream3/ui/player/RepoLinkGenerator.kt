@@ -121,6 +121,7 @@ class RepoLinkGenerator(
             basePath = info.basePath,
             displayName = info.displayName,
             relativePath = info.relativePath,
+            sourcePlugin = current.sourcePlugin,
         )
     }
 

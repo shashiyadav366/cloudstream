@@ -440,7 +440,8 @@ class PlayerGeneratorViewModel : ViewModel() {
                         response = (gen as? RepoLinkGenerator)?.page,
                         index = index,
                         allMeta = gen.videos,
-                        sourcePlugin = (gen.videos.getOrNull(index) as? ResultEpisode)?.sourcePlugin,
+                        sourcePlugin = (gen.videos.getOrNull(index) as? ResultEpisode)?.sourcePlugin
+                            ?: (gen.videos.getOrNull(index) as? ExtractorUri)?.sourcePlugin,
                     )
                 },
                 instance = instance + 1

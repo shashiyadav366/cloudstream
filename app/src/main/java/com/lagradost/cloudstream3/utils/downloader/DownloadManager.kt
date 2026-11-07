@@ -1710,6 +1710,7 @@ object VideoDownloadManager {
         currentPoster: String?,
         currentIsMovie: Boolean,
         tvType: TvType,
+        sourcePlugin: String? = episode.sourcePlugin,
     ): DownloadEpisodeMetadata {
         return DownloadEpisodeMetadata(
             episode.id,
@@ -1721,6 +1722,7 @@ object VideoDownloadManager {
             if (currentIsMovie) null else episode.season,
             if (currentIsMovie) null else episode.episode,
             tvType,
+            sourcePlugin,
         )
     }
 
@@ -1952,20 +1954,31 @@ object VideoDownloadManager {
         ) {
             val downloadItem = downloadQueueWrapper.downloadItem ?: return
             try {
-                // Prepare visual keys
+                val sourcePlugin = downloadItem.episode.sourcePlugin
+                // Prepare visual keys. Keep a plain-id header for legacy readers and also
+                // store a provider-scoped header when identity is known.
+                val header = DownloadObjects.DownloadHeaderCached(
+                    apiName = downloadItem.apiName,
+                    url = downloadItem.resultUrl,
+                    type = downloadItem.resultType,
+                    name = downloadItem.resultName,
+                    poster = downloadItem.resultPoster,
+                    id = downloadItem.resultId,
+                    cacheTime = System.currentTimeMillis(),
+                    sourcePlugin = sourcePlugin,
+                )
                 setKey(
                     DOWNLOAD_HEADER_CACHE,
                     downloadItem.resultId.toString(),
-                    DownloadObjects.DownloadHeaderCached(
-                        apiName = downloadItem.apiName,
-                        url = downloadItem.resultUrl,
-                        type = downloadItem.resultType,
-                        name = downloadItem.resultName,
-                        poster = downloadItem.resultPoster,
-                        id = downloadItem.resultId,
-                        cacheTime = System.currentTimeMillis(),
-                    )
+                    header
                 )
+                val scopedHeaderKey = com.lagradost.cloudstream3.utils.DataStoreHelper.headerCacheKey(
+                    downloadItem.resultId,
+                    sourcePlugin
+                )
+                if (scopedHeaderKey != downloadItem.resultId.toString()) {
+                    setKey(DOWNLOAD_HEADER_CACHE, scopedHeaderKey, header)
+                }
                 setKey(
                     getFolderName(
                         DOWNLOAD_EPISODE_CACHE,
@@ -1982,6 +1995,7 @@ object VideoDownloadManager {
                         score = downloadItem.episode.score,
                         description = downloadItem.episode.description,
                         cacheTime = System.currentTimeMillis(),
+                        sourcePlugin = sourcePlugin,
                     )
                 )
 
@@ -1992,7 +2006,8 @@ object VideoDownloadManager {
                         downloadItem.apiName,
                         downloadItem.resultPoster,
                         downloadItem.isMovie,
-                        downloadItem.resultType
+                        downloadItem.resultType,
+                        sourcePlugin,
                     )
 
                 val folder =

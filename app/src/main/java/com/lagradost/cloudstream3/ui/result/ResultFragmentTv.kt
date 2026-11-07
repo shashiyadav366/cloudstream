@@ -607,6 +607,13 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
 
             binding.apply {
                 (data as? Resource.Success)?.value?.let { (_, ep) ->
+                    resultPlayMovieButton.setIconResource(
+                        if (DownloadButtonSetup.isDownloadComplete(requireContext(), ep.id)) {
+                            R.drawable.download_icon_done
+                        } else {
+                            R.drawable.ic_baseline_play_arrow_24
+                        }
+                    )
                     resultPlayMovieButton.setOnClickListener {
                         viewModel.handleAction(
                             EpisodeClickEvent(ACTION_CLICK_DEFAULT, ep)

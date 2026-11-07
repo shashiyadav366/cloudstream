@@ -16,6 +16,7 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.DOWNLOAD_EPISODE_CACHE
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE
+import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.SnackbarHelper.showSnackbar
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
@@ -116,7 +117,7 @@ object DownloadButtonSetup {
             }
 
             DOWNLOAD_ACTION_PLAY_FILE -> {
-                playDownloadedEpisode(click.data)
+                playDownloadedEpisode(click.data, sourcePlugin = click.data.sourcePlugin)
             }
         }
     }
@@ -130,7 +131,20 @@ object DownloadButtonSetup {
         return VideoDownloadManager.isDownloadComplete(context, id)
     }
 
-    fun getDownloadHeader(parentId: Int): DownloadObjects.DownloadHeaderCached? {
+    fun getDownloadHeader(
+        parentId: Int,
+        sourcePlugin: String? = null,
+    ): DownloadObjects.DownloadHeaderCached? {
+        if (sourcePlugin != null) {
+            val scopedKey = DataStoreHelper.headerCacheKey(parentId, sourcePlugin)
+            getKey<DownloadObjects.DownloadHeaderCached>(DOWNLOAD_HEADER_CACHE, scopedKey)?.let { return it }
+            getKey<DownloadObjects.DownloadHeaderCached>(
+                DOWNLOAD_HEADER_CACHE,
+                parentId.toString()
+            )?.takeIf { it.sourcePlugin == null || it.sourcePlugin == sourcePlugin }?.let { return it }
+            return null
+        }
+
         return getKey<DownloadObjects.DownloadHeaderCached>(
             DOWNLOAD_HEADER_CACHE,
             parentId.toString()
@@ -148,40 +162,64 @@ object DownloadButtonSetup {
     fun playDownloadedEpisode(
         episode: DownloadObjects.DownloadEpisodeCached,
         incognito: Boolean = false,
+        sourcePlugin: String? = null,
     ): Boolean {
         val act = activity ?: return false
         if (!isDownloadComplete(act, episode.id)) return false
 
-        val parent = getDownloadHeader(episode.parentId) ?: return false
+        val requestedSourcePlugin = sourcePlugin ?: episode.sourcePlugin
+        val resolvedSourcePlugin = requestedSourcePlugin ?: resolveSourcePlugin(episode)
+        val parent = getDownloadHeader(episode.parentId, resolvedSourcePlugin) ?: return false
+        if (resolvedSourcePlugin != null &&
+            parent.sourcePlugin != null &&
+            parent.sourcePlugin != resolvedSourcePlugin
+        ) {
+            return false
+        }
+
+        val effectiveSourcePlugin = resolvedSourcePlugin ?: parent.sourcePlugin
         val episodes = getKeys(DOWNLOAD_EPISODE_CACHE).orEmpty()
             .mapNotNull { getKey<DownloadObjects.DownloadEpisodeCached>(it) }
             .filter { it.parentId == episode.parentId }
+            .filter { cached ->
+                when {
+                    effectiveSourcePlugin != null -> cached.sourcePlugin == null || cached.sourcePlugin == effectiveSourcePlugin
+                    else -> cached.sourcePlugin == null
+                }
+            }
             .sortedWith(compareBy<DownloadObjects.DownloadEpisodeCached> {
                 it.season ?: 0
             }.thenBy { it.episode })
 
-        val items = episodes.mapNotNull {
+        val items = episodes.mapNotNull { cached ->
+            // Download info/progress is keyed by episode id; when provider identity is unknown
+            // for legacy metadata, avoid assuming global uniqueness across providers.
+            if (effectiveSourcePlugin == null && cached.id != episode.id && cached.sourcePlugin == null) {
+                return@mapNotNull null
+            }
             val keyInfo = getKey<DownloadObjects.DownloadedFileInfo>(
                 VideoDownloadManager.KEY_DOWNLOAD_INFO,
-                it.id.toString()
+                cached.id.toString()
             ) ?: return@mapNotNull null
 
+            val itemSourcePlugin = cached.sourcePlugin ?: effectiveSourcePlugin
             ExtractorUri(
                 // We just use a temporary placeholder for the URI,
                 // it will be updated in generateLinks().
                 // We just do this for performance since getting
                 // all paths at once can be quite expensive.
                 uri = Uri.EMPTY,
-                id = it.id,
-                parentId = it.parentId,
-                name = it.name ?: act.getString(R.string.downloaded_file),
-                season = it.season,
-                episode = it.episode,
+                id = cached.id,
+                parentId = cached.parentId,
+                name = cached.name ?: act.getString(R.string.downloaded_file),
+                season = cached.season,
+                episode = cached.episode,
                 headerName = parent.name,
                 tvType = parent.type,
                 basePath = keyInfo.basePath,
                 displayName = keyInfo.displayName,
                 relativePath = keyInfo.relativePath,
+                sourcePlugin = itemSourcePlugin,
             )
         }
 
@@ -196,5 +234,40 @@ object DownloadButtonSetup {
             )
         )
         return true
+    }
+
+    private fun resolveSourcePlugin(episode: DownloadObjects.DownloadEpisodeCached): String? {
+        val resumePlugin = DataStoreHelper.getAllResumeStates()
+            ?.filter { it.parentId == episode.parentId && it.episodeId == episode.id }
+            ?.sortedByDescending { it.updateTime }
+            ?.firstOrNull()
+            ?.sourcePlugin
+        if (resumePlugin != null) return resumePlugin
+
+        return getMatchingHeaderSourcePlugin(episode)
+    }
+
+    private fun getMatchingHeaderSourcePlugin(
+        episode: DownloadObjects.DownloadEpisodeCached,
+    ): String? {
+        val headers = getKeys(DOWNLOAD_HEADER_CACHE).orEmpty()
+            .mapNotNull { getKey<DownloadObjects.DownloadHeaderCached>(it) }
+            .filter { it.id == episode.parentId }
+        if (headers.isEmpty()) return null
+
+        val withPlugin = headers.mapNotNull { it.sourcePlugin }.distinct()
+        if (withPlugin.size == 1) return withPlugin.single()
+
+        val resumePluginsForEpisode = DataStoreHelper.getAllResumeStates()
+            ?.filter { it.parentId == episode.parentId && it.episodeId == episode.id }
+            ?.mapNotNull { it.sourcePlugin }
+            ?.distinct()
+            .orEmpty()
+        if (resumePluginsForEpisode.size == 1) {
+            val candidate = resumePluginsForEpisode.single()
+            if (headers.any { it.sourcePlugin == candidate }) return candidate
+        }
+
+        return null
     }
 }

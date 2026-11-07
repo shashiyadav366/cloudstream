@@ -2021,7 +2021,9 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun openResultPageForOfflineFallback(error: Throwable) {
         val meta = currentMeta as? ExtractorUri
         val act = activity
-        val header = meta?.parentId?.let { DownloadButtonSetup.getDownloadHeader(it) }
+        val header = meta?.parentId?.let {
+            DownloadButtonSetup.getDownloadHeader(it, meta.sourcePlugin)
+        }
 
         if (meta?.id == null || meta.parentId == null || header == null || act == null) {
             Log.i(TAG, "offline fallback could not open the result page, surfacing original error")
