@@ -28,9 +28,7 @@ import com.lagradost.cloudstream3.databinding.FragmentResultTvBinding
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.observe
 import com.lagradost.cloudstream3.mvvm.observeNullable
-import com.lagradost.cloudstream3.services.SubscriptionWorkManager
 import com.lagradost.cloudstream3.ui.BaseFragment
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
 import com.lagradost.cloudstream3.ui.player.ExtractorLinkGenerator
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
@@ -293,9 +291,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                         resultPlaySeriesButton,
                         resultResumeSeriesButton,
                         resultPlayTrailerButton,
-                        resultBookmarkButton,
                         resultFavoriteButton,
-                        resultSubscribeButton,
                         resultSearchButton
                     )
                     for (requestView in views) {
@@ -328,9 +324,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                 resultPlaySeriesButton to resultPlaySeriesText,
                 resultResumeSeriesButton to resultResumeSeriesText,
                 resultPlayTrailerButton to resultPlayTrailerText,
-                resultBookmarkButton to resultBookmarkText,
                 resultFavoriteButton to resultFavoriteText,
-                resultSubscribeButton to resultSubscribeText,
                 resultSearchButton to resultSearchText,
                 resultEpisodesShowButton to resultEpisodesShowText
             ).forEach { (button, text) ->
@@ -413,7 +407,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
 
             resultCastItems.setOnFocusChangeListener { _, hasFocus ->
                 // Always escape focus
-                if (hasFocus) binding.resultBookmarkButton.requestFocus()
+                if (hasFocus) binding.resultFavoriteButton.requestFocus()
             }
             //resultBack.setOnClickListener {
             //    activity?.popCurrentPage()
@@ -462,9 +456,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
 
             val aboveCast = listOf(
                 binding.resultEpisodesShow,
-                binding.resultBookmark,
                 binding.resultFavorite,
-                binding.resultSubscribe,
             ).firstOrNull { it.isVisible }
 
             resultCastItems.setRecycledViewPool(ActorAdaptor.sharedPool)
@@ -569,30 +561,6 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
             }
         }
 
-        observe(viewModel.watchStatus) { watchType ->
-            binding.apply {
-                resultBookmarkText.setText(watchType.stringRes)
-
-                resultBookmarkButton.apply {
-                    val drawable = if (watchType.stringRes == R.string.type_none) {
-                        R.drawable.outline_bookmark_add_24
-                    } else R.drawable.ic_baseline_bookmark_24
-                    setIconResource(drawable)
-
-                    setOnClickListener { view ->
-                        activity?.showBottomDialog(
-                            WatchType.entries.map { view.context.getString(it.stringRes) }.toList(),
-                            watchType.ordinal,
-                            view.context.getString(R.string.action_add_to_bookmarks),
-                            showApply = false,
-                            {}) {
-                            viewModel.updateWatchStatus(WatchType.entries[it], context)
-                        }
-                    }
-                }
-            }
-        }
-
         observeNullable(viewModel.favoriteStatus) { isFavorite ->
             binding.resultFavorite.isVisible = isFavorite != null
             binding.resultFavoriteButton.apply {
@@ -632,47 +600,6 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
             }
         }
 
-        observeNullable(viewModel.subscribeStatus) { isSubscribed ->
-            binding.resultSubscribe.isVisible = isSubscribed != null && isLayout(EMULATOR)
-            binding.resultSubscribeButton.apply {
-                if (isSubscribed == null) return@observeNullable
-
-                val drawable = if (isSubscribed) {
-                    R.drawable.ic_baseline_notifications_active_24
-                } else R.drawable.baseline_notifications_none_24
-                setIconResource(drawable)
-
-                setOnClickListener {
-                    viewModel.toggleSubscriptionStatus(context) { newStatus: Boolean? ->
-                        if (newStatus == null) return@toggleSubscriptionStatus
-
-                        val message = if (newStatus) {
-                            // Kinda icky to have this here, but it works.
-                            SubscriptionWorkManager.enqueuePeriodicWork(context)
-                            R.string.subscription_new
-                        } else R.string.subscription_deleted
-
-                        val name = (viewModel.page.value as? Resource.Success)?.value?.title
-                            ?: txt(R.string.no_data)
-                                .asStringNull(context) ?: ""
-                        CommonActivity.showToast(
-                            txt(
-                                message,
-                                name
-                            ), Toast.LENGTH_SHORT
-                        )
-                    }
-                }
-
-                binding.resultSubscribeText.apply {
-                    val text = if (isSubscribed) {
-                        R.string.action_unsubscribe
-                    } else R.string.action_subscribe
-                    setText(text)
-                }
-            }
-        }
-
         observeNullable(viewModel.movie) { data ->
             if (data == null) {
                 return@observeNullable
@@ -694,7 +621,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
 
                     resultPlayMovie.isVisible = !comingSoon && resultResumeSeries.isGone
                     if (comingSoon) {
-                        resultBookmarkButton.requestFocus()
+                        resultFavoriteButton.requestFocus()
                     } else resultPlayMovieButton.requestFocus()
 
                     // Stops last button right focus
@@ -809,7 +736,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
         observeNullable(viewModel.episodes) { episodes ->
             if (episodes == null) return@observeNullable
             binding.apply {
-                if (comingSoon) resultBookmarkButton.requestFocus()
+                if (comingSoon) resultFavoriteButton.requestFocus()
 
                 //    resultEpisodeLoading.isVisible = episodes is Resource.Loading
                 if (episodes is Resource.Success) {

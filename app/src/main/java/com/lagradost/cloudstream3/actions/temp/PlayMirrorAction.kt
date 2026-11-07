@@ -58,7 +58,7 @@ class PlayMirrorAction : VideoClickAction() {
         activity.navigate(
             R.id.global_to_navigation_player,
             GeneratorPlayer.newInstance(
-                generatorMirror, 0, result.syncData
+                generatorMirror, 0
             )
         )
     }

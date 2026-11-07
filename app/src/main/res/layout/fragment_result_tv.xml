@@ -418,30 +418,6 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                 </LinearLayout>
 
                 <LinearLayout
-                    android:id="@+id/result_bookmark"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:orientation="vertical">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/result_bookmark_Button"
-                        style="@style/ResultSmallButtonTV"
-                        android:focusable="true"
-                        android:nextFocusUp="@id/result_bookmark_Button"
-                        android:nextFocusDown="@id/result_description"
-                        android:tag="@string/tv_no_focus_tag"
-                        app:icon="@drawable/outline_bookmark_add_24"
-                        app:iconPadding="0dp" />
-
-                    <TextView
-                        android:id="@+id/result_bookmark_text"
-                        style="@style/ResultMarqueeButtonText"
-                        android:text="@string/type_none" />
-
-                </LinearLayout>
-
-                <LinearLayout
                     android:id="@+id/result_favorite"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -462,30 +438,6 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                         android:id="@+id/result_favorite_Text"
                         style="@style/ResultMarqueeButtonText"
                         android:text="@string/favorite" />
-
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/result_subscribe"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:orientation="vertical">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/result_subscribe_Button"
-                        style="@style/ResultSmallButtonTV"
-                        android:focusable="true"
-                        android:nextFocusUp="@id/result_subscribe_Button"
-                        android:nextFocusDown="@id/result_description"
-                        android:tag="@string/tv_no_focus_tag"
-                        app:icon="@drawable/baseline_notifications_none_24"
-                        app:iconPadding="0dp" />
-
-                    <TextView
-                        android:id="@+id/result_subscribe_text"
-                        style="@style/ResultMarqueeButtonText"
-                        android:text="@string/action_subscribe" />
 
                 </LinearLayout>
 
@@ -1045,26 +997,6 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                 android:textSize="20sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
-
-            <LinearLayout
-                android:id="@+id/result_data_holder"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/result_add_sync"
-                    style="@style/WhiteButton"
-                    android:layout_width="match_parent"
-                    android:layout_gravity="center_vertical"
-                    android:layout_marginStart="0dp"
-
-                    android:layout_marginBottom="10dp"
-                    android:text="@string/add_sync"
-                    android:visibility="gone"
-                    app:icon="@drawable/ic_baseline_add_24" />
-
-            </LinearLayout>
 
             <LinearLayout
                 android:layout_width="250dp"

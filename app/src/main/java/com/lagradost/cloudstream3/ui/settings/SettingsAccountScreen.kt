@@ -11,18 +11,6 @@ import androidx.fragment.app.FragmentActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.onDialogDismissedEvent
 import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.aniListApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.animeSkipApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.kitsuApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.malApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.openSubtitlesApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.simklApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.subDlApi
-import com.lagradost.cloudstream3.syncproviders.PlainAuthRepo
-import com.lagradost.cloudstream3.syncproviders.SubtitleRepo
-import com.lagradost.cloudstream3.syncproviders.SyncRepo
-import com.lagradost.cloudstream3.ui.settings.SettingsAccount.Companion.addAccount
-import com.lagradost.cloudstream3.ui.settings.SettingsAccount.Companion.showLoginInfo
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.BackupUtils
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator
@@ -42,15 +30,6 @@ import com.mihon.presentation.settings.SearchableSettings
 import kotlinx.collections.immutable.persistentListOf
 
 object SettingsAccountScreen : SearchableSettings, BiometricAuthenticator.BiometricCallback {
-    val syncApis = persistentListOf(
-        SyncRepo(malApi),
-        SyncRepo(kitsuApi),
-        SyncRepo(aniListApi),
-        SyncRepo(simklApi),
-        SubtitleRepo(openSubtitlesApi),
-        SubtitleRepo(subDlApi),
-        PlainAuthRepo(animeSkipApi),
-    )
     private fun updateAuthPreference(context: Context, enabled: Boolean) {
         val settings = AppSettings(context)
         settings.security.biometrics.set(enabled)
@@ -96,25 +75,12 @@ object SettingsAccountScreen : SearchableSettings, BiometricAuthenticator.Biomet
         return persistentListOf(
             Preference.PreferenceGroup(
                 title = stringResource(R.string.pref_category_accounts),
-                preferenceItems = syncApis.map { api ->
-                    Preference.PreferenceItem.TextPreference(
-                        title = api.name,
-                        icon = api.icon?.let { painterResource(it) },
-                        onClick = {
-                            val activity = activity ?: return@TextPreference
-                            val info = api.authUser()
-                            val index =
-                                api.accounts.indexOfFirst { account -> account.user.id == info?.id }
-                            if (api.accounts.isNotEmpty()) {
-                                showLoginInfo(activity, api, info, index)
-                            } else {
-                                addAccount(activity, api)
-                            }
-                        })
-                } + Preference.PreferenceItem.SwitchPreference(
-                    preference = settings.security.skipAccountSelection,
-                    title = stringResource(R.string.skip_startup_account_select_pref),
-                    icon = painterResource(R.drawable.ic_outline_account_circle_24)
+                preferenceItems = persistentListOf(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = settings.security.skipAccountSelection,
+                        title = stringResource(R.string.skip_startup_account_select_pref),
+                        icon = painterResource(R.drawable.ic_outline_account_circle_24)
+                    )
                 ),
             ), Preference.PreferenceGroup(
                 enabled = hasSecurity && isLayout(PHONE),

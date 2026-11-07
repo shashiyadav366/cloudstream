@@ -5,7 +5,6 @@ import androidx.compose.runtime.Immutable
 import androidx.preference.PreferenceManager
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKeyClass
@@ -16,7 +15,6 @@ import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKeyClass
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.DubStatus
-import com.lagradost.cloudstream3.EpisodeResponse
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.Score
@@ -26,7 +24,6 @@ import com.lagradost.cloudstream3.SourcePluginAware
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.library.ListSorting
 import com.lagradost.cloudstream3.ui.player.ExtractorUri
 import com.lagradost.cloudstream3.ui.player.NEXT_WATCH_EPISODE_PERCENTAGE
@@ -52,9 +49,6 @@ import kotlin.reflect.KProperty
 
 const val VIDEO_POS_DUR = "video_pos_dur"
 const val VIDEO_WATCH_STATE = "video_watch_state"
-const val RESULT_WATCH_STATE = "result_watch_state"
-const val RESULT_WATCH_STATE_DATA = "result_watch_state_data"
-const val RESULT_SUBSCRIBED_STATE_DATA = "result_subscribed_state_data"
 const val RESULT_FAVORITES_STATE_DATA = "result_favorites_state_data"
 const val RESULT_RESUME_WATCHING = "result_resume_watching_2" // Changed due to id changes
 const val RESULT_RESUME_WATCHING_OLD = "result_resume_watching"
@@ -149,11 +143,6 @@ object DataStoreHelper {
         set(value) {
             homePreferenceStrings = serializeTv(value)
         }
-
-    var homeBookmarkedList: IntArray by UserPreferenceDelegate(
-        "home_bookmarked_last_list",
-        IntArray(0)
-    )
 
     var playBackSpeed: Float by UserPreferenceDelegate("playback_speed", 1.0f)
     var resizeMode: Int by UserPreferenceDelegate("resize_mode", 0)
@@ -252,7 +241,6 @@ object DataStoreHelper {
         if(showToast) {
             showToast(context?.getString(R.string.logged_account, account.name) ?: account.name)
         }
-        MainActivity.bookmarksUpdatedEvent(true)
         MainActivity.reloadLibraryEvent(true)
         val oldAccount = accounts.find { it.keyIndex == account.keyIndex }
         if (oldAccount != null && currentHomePage != homepage) {
@@ -359,131 +347,6 @@ object DataStoreHelper {
 
     @OptIn(ExperimentalSerializationApi::class) // KeepGeneratedSerializer is an experimental annotation for now
     @KeepGeneratedSerializer
-    @Serializable(with = SubscribedData.Serializer::class)
-    data class SubscribedData(
-        @JsonProperty("subscribedTime") @SerialName("subscribedTime") val subscribedTime: Long,
-        @JsonProperty("lastSeenEpisodeCount") @SerialName("lastSeenEpisodeCount") val lastSeenEpisodeCount: Map<DubStatus, Int?>,
-        @JsonProperty("id") @SerialName("id") override var id: Int?,
-        @JsonProperty("latestUpdatedTime") @SerialName("latestUpdatedTime") override val latestUpdatedTime: Long,
-        @JsonProperty("name") @SerialName("name") override val name: String,
-        @JsonProperty("url") @SerialName("url") override val url: String,
-        @JsonProperty("apiName") @SerialName("apiName") override val apiName: String,
-        @JsonProperty("type") @SerialName("type") override var type: TvType?,
-        @JsonProperty("posterUrl") @SerialName("posterUrl") override var posterUrl: String?,
-        @JsonProperty("year") @SerialName("year") override val year: Int?,
-        @JsonProperty("syncData") @SerialName("syncData") override val syncData: Map<String, String>? = null,
-        @JsonProperty("quality") @SerialName("quality") override var quality: SearchQuality? = null,
-        @JsonProperty("posterHeaders") @SerialName("posterHeaders") override var posterHeaders: Map<String, String>? = null,
-        @JsonProperty("plot") @SerialName("plot") override val plot: String? = null,
-        @JsonProperty("score") @SerialName("score") override var score: Score? = null,
-        @JsonProperty("tags") @SerialName("tags") override val tags: List<String>? = null,
-    ) : LibrarySearchResponse(
-        id,
-        latestUpdatedTime,
-        name,
-        url,
-        apiName,
-        type,
-        posterUrl,
-        year,
-        syncData,
-        quality,
-        posterHeaders,
-        plot,
-        score,
-        tags,
-    ) {
-        object Serializer : WriteOnlySerializer<SubscribedData>(
-            SubscribedData.generatedSerializer(),
-            setOf("rating"),
-        )
-
-        fun toLibraryItem(): SyncAPI.LibraryItem? {
-            return SyncAPI.LibraryItem(
-                name,
-                url,
-                id?.toString() ?: return null,
-                null,
-                null,
-                null,
-                latestUpdatedTime,
-                apiName,
-                type,
-                posterUrl,
-                posterHeaders,
-                quality,
-                year?.toYear(),
-                this.id,
-                plot = this.plot,
-                score = this.score,
-                tags = this.tags,
-            )
-        }
-    }
-
-    @OptIn(ExperimentalSerializationApi::class) // KeepGeneratedSerializer is an experimental annotation for now
-    @KeepGeneratedSerializer
-    @Serializable(with = BookmarkedData.Serializer::class)
-    data class BookmarkedData(
-        @JsonProperty("bookmarkedTime") @SerialName("bookmarkedTime") val bookmarkedTime: Long,
-        @JsonProperty("id") @SerialName("id") override var id: Int?,
-        @JsonProperty("latestUpdatedTime") @SerialName("latestUpdatedTime") override val latestUpdatedTime: Long,
-        @JsonProperty("name") @SerialName("name") override val name: String,
-        @JsonProperty("url") @SerialName("url") override val url: String,
-        @JsonProperty("apiName") @SerialName("apiName") override val apiName: String,
-        @JsonProperty("type") @SerialName("type") override var type: TvType?,
-        @JsonProperty("posterUrl") @SerialName("posterUrl") override var posterUrl: String?,
-        @JsonProperty("year") @SerialName("year") override val year: Int?,
-        @JsonProperty("syncData") @SerialName("syncData") override val syncData: Map<String, String>? = null,
-        @JsonProperty("quality") @SerialName("quality") override var quality: SearchQuality? = null,
-        @JsonProperty("posterHeaders") @SerialName("posterHeaders") override var posterHeaders: Map<String, String>? = null,
-        @JsonProperty("plot") @SerialName("plot") override val plot: String? = null,
-        @JsonProperty("score") @SerialName("score") override var score: Score? = null,
-        @JsonProperty("tags") @SerialName("tags") override val tags: List<String>? = null,
-    ) : LibrarySearchResponse(
-        id,
-        latestUpdatedTime,
-        name,
-        url,
-        apiName,
-        type,
-        posterUrl,
-        year,
-        syncData,
-        quality,
-        posterHeaders,
-        plot,
-    ) {
-        object Serializer : WriteOnlySerializer<BookmarkedData>(
-            BookmarkedData.generatedSerializer(),
-            setOf("rating"),
-        )
-
-        fun toLibraryItem(id: String): SyncAPI.LibraryItem {
-            return SyncAPI.LibraryItem(
-                name,
-                url,
-                id,
-                null,
-                null,
-                null,
-                latestUpdatedTime,
-                apiName,
-                type,
-                posterUrl,
-                posterHeaders,
-                quality,
-                year?.toYear(),
-                this.id,
-                plot = this.plot,
-                score = this.score,
-                tags = this.tags,
-            )
-        }
-    }
-
-    @OptIn(ExperimentalSerializationApi::class) // KeepGeneratedSerializer is an experimental annotation for now
-    @KeepGeneratedSerializer
     @Serializable(with = FavoritesData.Serializer::class)
     data class FavoritesData(
         @JsonProperty("favoritesTime") @SerialName("favoritesTime") val favoritesTime: Long,
@@ -576,13 +439,6 @@ object DataStoreHelper {
      * A datastore wide account for future implementations of a multiple account system
      */
 
-    fun getAllWatchStateIds(): List<Int>? {
-        val folder = "$currentAccount/$RESULT_WATCH_STATE"
-        return getKeys(folder)?.mapNotNull {
-            it.removePrefix("$folder/").toIntOrNull()
-        }
-    }
-
     fun deleteAllResumeStateIds() {
         val folder = "$currentAccount/$RESULT_RESUME_WATCHING"
         removeKeys(folder)
@@ -592,13 +448,6 @@ object DataStoreHelper {
     fun deleteAllWatchHistory() {
         removeKeys("$currentAccount/$RESULT_RESUME_WATCHING")
         removeKeys("$currentAccount/$VIDEO_POS_DUR")
-    }
-
-    fun deleteBookmarkedData(id: Int?) {
-        if (id == null) return
-        AccountManager.localListApi.requireLibraryRefresh = true
-        removeKey("$currentAccount/$RESULT_WATCH_STATE", id.toString())
-        removeKey("$currentAccount/$RESULT_WATCH_STATE_DATA", id.toString())
     }
 
     fun getAllResumeStateIds(): List<Int>? {
@@ -734,58 +583,6 @@ object DataStoreHelper {
             "$currentAccount/$RESULT_RESUME_WATCHING_OLD",
             id.toString(),
         )
-    }
-
-    fun setBookmarkedData(id: Int?, data: BookmarkedData) {
-        if (id == null) return
-        setKey("$currentAccount/$RESULT_WATCH_STATE_DATA", id.toString(), data)
-        AccountManager.localListApi.requireLibraryRefresh = true
-    }
-
-    fun getBookmarkedData(id: Int?): BookmarkedData? {
-        if (id == null) return null
-        return getKey<BookmarkedData>("$currentAccount/$RESULT_WATCH_STATE_DATA", id.toString())
-    }
-
-    fun getAllBookmarkedData(): List<BookmarkedData> {
-        return getKeys("$currentAccount/$RESULT_WATCH_STATE_DATA")?.mapNotNull {
-            getKey<BookmarkedData>(it)
-        } ?: emptyList()
-    }
-
-    fun getAllSubscriptions(): List<SubscribedData> {
-        return getKeys("$currentAccount/$RESULT_SUBSCRIBED_STATE_DATA")?.mapNotNull {
-            getKey<SubscribedData>(it)
-        } ?: emptyList()
-    }
-
-    fun removeSubscribedData(id: Int?) {
-        if (id == null) return
-        AccountManager.localListApi.requireLibraryRefresh = true
-        removeKey("$currentAccount/$RESULT_SUBSCRIBED_STATE_DATA", id.toString())
-    }
-
-    /**
-     * Set new seen episodes and update time
-     */
-    fun updateSubscribedData(id: Int?, data: SubscribedData?, episodeResponse: EpisodeResponse?) {
-        if (id == null || data == null || episodeResponse == null) return
-        val newData = data.copy(
-            latestUpdatedTime = unixTimeMS,
-            lastSeenEpisodeCount = episodeResponse.getLatestEpisodes(),
-        )
-        setKey("$currentAccount/$RESULT_SUBSCRIBED_STATE_DATA", id.toString(), newData)
-    }
-
-    fun setSubscribedData(id: Int?, data: SubscribedData) {
-        if (id == null) return
-        setKey("$currentAccount/$RESULT_SUBSCRIBED_STATE_DATA", id.toString(), data)
-        AccountManager.localListApi.requireLibraryRefresh = true
-    }
-
-    fun getSubscribedData(id: Int?): SubscribedData? {
-        if (id == null) return null
-        return getKey<SubscribedData>("$currentAccount/$RESULT_SUBSCRIBED_STATE_DATA", id.toString())
     }
 
     fun getAllFavorites(): List<FavoritesData> {
@@ -1099,25 +896,6 @@ object DataStoreHelper {
 
     fun setDub(id: Int, status: DubStatus) {
         setKey("$currentAccount/$RESULT_DUB", id.toString(), status.ordinal)
-    }
-
-    fun setResultWatchState(id: Int?, status: Int) {
-        if (id == null) return
-        if (status == WatchType.NONE.internalId) {
-            deleteBookmarkedData(id)
-        } else {
-            setKey("$currentAccount/$RESULT_WATCH_STATE", id.toString(), status)
-        }
-    }
-
-    fun getResultWatchState(id: Int): WatchType {
-        return WatchType.fromInternalId(
-            getKey<Int>(
-                "$currentAccount/$RESULT_WATCH_STATE",
-                id.toString(),
-                null,
-            )
-        )
     }
 
     fun getResultSeason(id: Int): Int? {

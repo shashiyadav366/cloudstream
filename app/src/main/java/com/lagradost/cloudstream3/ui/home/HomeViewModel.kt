@@ -16,6 +16,7 @@ import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainActivity
@@ -33,7 +34,6 @@ import com.lagradost.cloudstream3.services.LiveEventScheduleWorker
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.APIRepository.Companion.noneApi
 import com.lagradost.cloudstream3.ui.APIRepository.Companion.randomApi
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.quicksearch.QuickSearchFragment
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_FOCUSED
@@ -50,17 +50,13 @@ import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE
 import com.lagradost.cloudstream3.utils.DOWNLOAD_HEADER_CACHE_BACKUP
 import com.lagradost.cloudstream3.utils.DataStoreHelper
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllWatchStateIds
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getCurrentAccount
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getResultWatchState
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.util.EnumSet
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 
@@ -80,6 +76,7 @@ class HomeViewModel : ViewModel() {
         private const val CUSTOM_HOME_REFRESH_DELAY_MS = 1500L
 
         suspend fun getResumeWatching(): List<DataStoreHelper.ResumeWatchingResult>? {
+            if (!DataStoreHelper.isWatchHistoryEnabled()) return emptyList()
             val resumeWatching = withContext(Dispatchers.IO) {
                 DataStoreHelper.getAllResumeStates()?.sortedBy { -it.updateTime }
             }
@@ -166,11 +163,6 @@ class HomeViewModel : ViewModel() {
         loadResumeWatching()
     }
 
-    fun deleteBookmarks(list: List<SearchResponse>) {
-        list.forEach { DataStoreHelper.deleteBookmarkedData(it.id) }
-        loadStoredData()
-    }
-
     var repo: APIRepository? = null
 
     private val _apiName = MutableLiveData<String>()
@@ -187,13 +179,6 @@ class HomeViewModel : ViewModel() {
     private fun autoloadRepo(): APIRepository {
         return APIRepository(apis.withLock { apis.first { it.hasMainPage } })
     }
-
-    private val _availableWatchStatusTypes =
-        MutableLiveData<Pair<Set<WatchType>, Set<WatchType>>>()
-    val availableWatchStatusTypes: LiveData<Pair<Set<WatchType>, Set<WatchType>>> =
-        _availableWatchStatusTypes
-    private val _bookmarks = MutableLiveData<Pair<Boolean, List<SearchResponse>>>()
-    val bookmarks: LiveData<Pair<Boolean, List<SearchResponse>>> = _bookmarks
 
     private val _resumeWatching = MutableLiveData<List<SearchResponse>>()
     private val _preview = MutableLiveData<Resource<Pair<Boolean, List<LoadResponse>>>>()
@@ -236,6 +221,13 @@ class HomeViewModel : ViewModel() {
                 } else {
                     clearCricketLive()
                 }
+            }
+        }
+
+    private val watchHistoryPreferenceListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == context?.getString(R.string.watch_history_key)) {
+                reloadStored()
             }
         }
 
@@ -525,51 +517,6 @@ class HomeViewModel : ViewModel() {
         publishResumeWatching(
             withContext(Dispatchers.IO) { refreshLiveCardUrls(cleaned) }
         )
-    }
-
-    fun loadStoredData(preferredWatchStatus: Set<WatchType>?) = viewModelScope.launchSafe {
-        val watchStatusIds = withContext(Dispatchers.IO) {
-            getAllWatchStateIds()?.map { id ->
-                Pair(id, getResultWatchState(id))
-            }
-        }?.distinctBy { it.first } ?: return@launchSafe
-
-        val length = WatchType.entries.size
-        val currentWatchTypes = mutableSetOf<WatchType>()
-
-        for (watch in watchStatusIds) {
-            currentWatchTypes.add(watch.second)
-            if (currentWatchTypes.size >= length) {
-                break
-            }
-        }
-
-        currentWatchTypes.remove(WatchType.NONE)
-
-        if (currentWatchTypes.size <= 0) {
-            DataStoreHelper.homeBookmarkedList = intArrayOf()
-            _availableWatchStatusTypes.postValue(setOf<WatchType>() to setOf())
-            _bookmarks.postValue(Pair(false, ArrayList()))
-            return@launchSafe
-        }
-
-        val watchPrefNotNull = preferredWatchStatus ?: EnumSet.of(currentWatchTypes.first())
-        //if (currentWatchTypes.any { watchPrefNotNull.contains(it) }) watchPrefNotNull else listOf(currentWatchTypes.first())
-
-        DataStoreHelper.homeBookmarkedList = watchPrefNotNull.map { it.internalId }.toIntArray()
-        _availableWatchStatusTypes.postValue(
-
-            watchPrefNotNull to
-                    currentWatchTypes,
-
-            )
-
-        val list = withContext(Dispatchers.IO) {
-            watchStatusIds.filter { watchPrefNotNull.contains(it.second) }
-                .mapNotNull { getBookmarkedData(it.first) }
-                .sortedBy { -it.latestUpdatedTime }
-        }
-        _bookmarks.postValue(Pair(true, list))
     }
 
     private var onGoingLoad: Job? = null
@@ -988,10 +935,6 @@ class HomeViewModel : ViewModel() {
             _popup.postValue(list to deleteCallback)
     }
 
-    private fun bookmarksUpdated(unused: Boolean) {
-        reloadStored()
-    }
-
     private fun afterPluginsLoaded(forceReload: Boolean) {
         scheduleCustomHomeRefresh(CUSTOM_HOME_REFRESH_DELAY_MS)
         // Don't force reload on plugin-loaded events — the page already loads with
@@ -1064,6 +1007,10 @@ class HomeViewModel : ViewModel() {
         loadCricketLive(force = true)
     }
 
+    private fun onReloadStoredEvent(unused: Boolean) {
+        reloadStored()
+    }
+
     /**
      * Refresh button path: reload the selected home provider and fetch a fresh
      * cricket schedule/cards too, without leaving and reopening Home.
@@ -1088,14 +1035,16 @@ class HomeViewModel : ViewModel() {
     }
 
     init {
-        MainActivity.bookmarksUpdatedEvent += ::bookmarksUpdated
         MainActivity.afterPluginsLoadedEvent += ::afterPluginsLoaded
         MainActivity.mainPluginsLoadedEvent += ::afterMainPluginsLoaded
         MainActivity.reloadHomeEvent += ::reloadHome
+        MainActivity.reloadStoredEvent += ::onReloadStoredEvent
         MainActivity.reloadAccountEvent += ::reloadAccount
         context?.let {
             PreferenceManager.getDefaultSharedPreferences(it)
                 .registerOnSharedPreferenceChangeListener(cricketLivePreferenceListener)
+            PreferenceManager.getDefaultSharedPreferences(it)
+                .registerOnSharedPreferenceChangeListener(watchHistoryPreferenceListener)
         }
         loadCricketLive()
     }
@@ -1104,11 +1053,13 @@ class HomeViewModel : ViewModel() {
         context?.let {
             PreferenceManager.getDefaultSharedPreferences(it)
                 .unregisterOnSharedPreferenceChangeListener(cricketLivePreferenceListener)
+            PreferenceManager.getDefaultSharedPreferences(it)
+                .unregisterOnSharedPreferenceChangeListener(watchHistoryPreferenceListener)
         }
-        MainActivity.bookmarksUpdatedEvent -= ::bookmarksUpdated
         MainActivity.afterPluginsLoadedEvent -= ::afterPluginsLoaded
         MainActivity.mainPluginsLoadedEvent -= ::afterMainPluginsLoaded
         MainActivity.reloadHomeEvent -= ::reloadHome
+        MainActivity.reloadStoredEvent -= ::onReloadStoredEvent
         MainActivity.reloadAccountEvent -= ::reloadAccount
         super.onCleared()
     }
@@ -1123,17 +1074,8 @@ class HomeViewModel : ViewModel() {
         // do nothing
     }
 
-    fun loadStoredData() {
-        val list = EnumSet.noneOf(WatchType::class.java)
-        DataStoreHelper.homeBookmarkedList.map { WatchType.fromInternalId(it) }.let {
-            list.addAll(it)
-        }
-        loadStoredData(list)
-    }
-
     fun reloadStored() {
         loadResumeWatching()
-        loadStoredData()
     }
 
     fun click(load: LoadClickCallback) {

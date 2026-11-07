@@ -27,19 +27,9 @@ import com.lagradost.cloudstream3.databinding.AccountSwitchBinding
 import com.lagradost.cloudstream3.databinding.AddAccountInputBinding
 import com.lagradost.cloudstream3.databinding.DeviceAuthBinding
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.aniListApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.animeSkipApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.kitsuApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.malApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.openSubtitlesApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.simklApi
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.subDlApi
 import com.lagradost.cloudstream3.syncproviders.AuthLoginResponse
 import com.lagradost.cloudstream3.syncproviders.AuthRepo
 import com.lagradost.cloudstream3.syncproviders.AuthUser
-import com.lagradost.cloudstream3.syncproviders.PlainAuthRepo
-import com.lagradost.cloudstream3.syncproviders.SubtitleRepo
-import com.lagradost.cloudstream3.syncproviders.SyncRepo
 import com.lagradost.cloudstream3.ui.BasePreferenceFragmentCompat
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
@@ -464,34 +454,6 @@ class SettingsAccount : BasePreferenceFragmentCompat(), BiometricCallback {
             }
 
             false
-        }
-
-        val syncApis =
-            listOf(
-                R.string.mal_key to SyncRepo(malApi),
-                R.string.kitsu_key to SyncRepo(kitsuApi),
-                R.string.anilist_key to SyncRepo(aniListApi),
-                R.string.simkl_key to SyncRepo(simklApi),
-                R.string.opensubtitles_key to SubtitleRepo(openSubtitlesApi),
-                R.string.subdl_key to SubtitleRepo(subDlApi),
-                R.string.animeskip_key to PlainAuthRepo(animeSkipApi),
-            )
-
-        for ((key, api) in syncApis) {
-            getPref(key)?.apply {
-                title = api.name
-                setOnPreferenceClickListener {
-                    val activity = activity ?: return@setOnPreferenceClickListener false
-                    val info = api.authUser()
-                    val index = api.accounts.indexOfFirst { account -> account.user.id == info?.id }
-                    if (api.accounts.isNotEmpty()) {
-                        showLoginInfo(activity, api, info, index)
-                    } else {
-                        addAccount(activity, api)
-                    }
-                    return@setOnPreferenceClickListener true
-                }
-            }
         }
     }
 }

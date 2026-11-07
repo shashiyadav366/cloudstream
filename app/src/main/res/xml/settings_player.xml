@@ -2,13 +2,6 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <SwitchPreference
-        android:icon="@drawable/baseline_sync_24"
-        android:summary="@string/episode_sync_settings_des"
-        android:title="@string/episode_sync_settings"
-        app:defaultValue="true"
-        app:key="@string/episode_sync_enabled_key" />
-
     <PreferenceCategory android:title="@string/pref_category_defaults">
         <!--        <Preference-->
         <!--            android:icon="@drawable/ic_baseline_hd_24"-->

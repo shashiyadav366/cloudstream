@@ -57,20 +57,6 @@
                         tools:text="The Perfect Run" />
 
                     <ImageView
-                        android:id="@+id/resultview_preview_subscribe"
-                        android:layout_width="25dp"
-                        android:layout_height="25dp"
-                        android:layout_gravity="end|center_vertical"
-
-                        android:layout_margin="5dp"
-                        android:background="?android:attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/subscribe_tooltip"
-                        android:elevation="10dp"
-                        android:nextFocusDown="@id/resultview_preview_bookmark"
-                        android:src="@drawable/baseline_notifications_none_24"
-                        app:tint="?attr/textColor" />
-
-                    <ImageView
                         android:id="@+id/resultview_preview_favorite"
                         android:layout_width="25dp"
                         android:layout_height="25dp"
@@ -80,7 +66,7 @@
                         android:background="?android:attr/selectableItemBackgroundBorderless"
                         android:contentDescription="@string/favorite"
                         android:elevation="10dp"
-                        android:nextFocusDown="@id/resultview_preview_bookmark"
+                        android:nextFocusDown="@id/resultview_preview_continue_watching"
                         android:src="@drawable/ic_baseline_favorite_border_24"
                         app:tint="?attr/textColor" />
 
@@ -154,7 +140,7 @@
             android:padding="7dp">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/resultview_preview_bookmark"
+                android:id="@+id/resultview_preview_continue_watching"
                 style="@style/BlackButton"
                 android:layout_width="50dp"
                 android:layout_weight="1"
@@ -162,8 +148,8 @@
                 android:nextFocusRight="@id/resultview_preview_more_info"
 
                 android:nextFocusUp="@id/resultview_preview_favorite"
-                app:icon="@drawable/ic_baseline_bookmark_24"
-                tools:text="Bookmark"
+                app:icon="@drawable/ic_baseline_playlist_play_24"
+                android:text="@string/episode_action_add_to_continue_watching"
 
                 tools:visibility="visible" />
 
@@ -173,7 +159,7 @@
                 android:layout_width="50dp"
                 android:layout_weight="1"
 
-                android:nextFocusLeft="@id/resultview_preview_bookmark"
+                android:nextFocusLeft="@id/resultview_preview_continue_watching"
 
                 android:nextFocusUp="@id/resultview_preview_favorite"
                 android:text="@string/home_more_info"

@@ -6,16 +6,12 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Rect
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.text.Editable
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.view.animation.DecelerateInterpolator
-import android.widget.AbsListView
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isGone
@@ -38,13 +34,11 @@ import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainActivity.Companion.afterPluginsLoadedEvent
 import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.base64Encode
 import com.lagradost.cloudstream3.databinding.FragmentResultBinding
 import com.lagradost.cloudstream3.databinding.FragmentResultSwipeBinding
 import com.lagradost.cloudstream3.databinding.ResultRecommendationsBinding
-import com.lagradost.cloudstream3.databinding.ResultSyncBinding
 import com.lagradost.cloudstream3.databinding.TrailerCustomLayoutBinding
 import com.lagradost.cloudstream3.isLiveStream
 import com.lagradost.cloudstream3.mvvm.Resource
@@ -53,10 +47,8 @@ import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.observe
 import com.lagradost.cloudstream3.mvvm.observeNullable
 import com.lagradost.cloudstream3.mvvm.safe
-import com.lagradost.cloudstream3.services.SubscriptionWorkManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_SHARE
 import com.lagradost.cloudstream3.ui.BaseFragment
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_ACTION_DOWNLOAD
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_ACTION_LONG_CLICK
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
@@ -107,7 +99,6 @@ import com.lagradost.cloudstream3.utils.setTextHtml
 import com.lagradost.cloudstream3.utils.txt
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentLinkedDeque
-import kotlin.math.roundToInt
 
 open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
     BindingCreator.Inflate(FragmentResultSwipeBinding::inflate)
@@ -186,11 +177,9 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
     }
 
     protected lateinit var viewModel: ResultViewModel2
-    protected lateinit var syncModel: SyncViewModel
 
     protected var resultBinding: FragmentResultBinding? = null
     protected var recommendationBinding: ResultRecommendationsBinding? = null
-    protected var syncBinding: ResultSyncBinding? = null
 
     var player: IPlayer = CS3IPlayer()
     protected open var hasPipModeSupport: Boolean = false
@@ -345,7 +334,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
         playerBinding = null
         resultBinding?.resultScroll?.setOnClickListener(null)
         resultBinding = null
-        syncBinding = null
         recommendationBinding = null
         activity?.detachBackPressedCallback(this@ResultFragmentPhone.toString())
         super.onDestroyView()
@@ -426,19 +414,16 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
 
     @Suppress("UNUSED_PARAMETER")
     private fun updateUI(id: Int?) {
-        syncModel.updateUserData()
         viewModel.reloadEpisodes()
     }
 
     override fun onBindingCreated(binding: FragmentResultSwipeBinding, savedInstanceState: Bundle?) {
         // Set up sub-binding references
         viewModel = ViewModelProvider(this)[ResultViewModel2::class.java]
-        syncModel = ViewModelProvider(this)[SyncViewModel::class.java]
         updateUIEvent += ::updateUI
 
         resultBinding = binding.fragmentResult
         recommendationBinding = binding.resultRecommendations
-        syncBinding = binding.resultSync
 
         // Set up trailer player
         val ctx = context ?: return
@@ -470,7 +455,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
             )
 
         setUrl(storedData.url)
-        syncModel.addFromUrl(storedData.url)
         val api = APIHolder.getApiFromSourceAndNameNull(
             storedData.apiName,
             storedData.sourcePlugin
@@ -580,11 +564,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
 
             resultScroll.setOnScrollChangeListener(NestedScrollView.OnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
                 val dy = scrollY - oldScrollY
-                if (dy > 0) { //check for scroll down
-                    binding.resultBookmarkFab.shrink()
-                } else if (dy < -5) {
-                    binding.resultBookmarkFab.extend()
-                }
                 if (!isFullScreenPlayer && player.getIsPlaying()) {
                     if (scrollY > (resultBinding?.fragmentTrailer?.playerBackground?.height
                             ?: scrollY)
@@ -608,46 +587,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                 } else resultOverlappingPanels.closePanels()
             }
 
-            resultMiniSync.setOnClickListener {
-                if (resultOverlappingPanels.getSelectedPanel().ordinal == 1) {
-                    resultOverlappingPanels.openStartPanel()
-                } else resultOverlappingPanels.closePanels()
-            }
-
-            /*
-            resultMiniSync.setRecycledViewPool(ImageAdapter.sharedPool)
-            resultMiniSync.adapter = ImageAdapter(
-                nextFocusDown = R.id.result_sync_set_score,
-                clickCallback = { action ->
-                    if (action == IMAGE_CLICK || action == IMAGE_LONG_CLICK) {
-                        if (resultOverlappingPanels.getSelectedPanel().ordinal == 1) {
-                            resultOverlappingPanels.openStartPanel()
-                        } else resultOverlappingPanels.closePanels()
-                    }
-                })
-            */
-            resultSubscribe.setOnClickListener {
-                viewModel.toggleSubscriptionStatus(context) { newStatus: Boolean? ->
-                    if (newStatus == null) return@toggleSubscriptionStatus
-
-                    val message = if (newStatus) {
-                        // Kinda icky to have this here, but it works.
-                        SubscriptionWorkManager.enqueuePeriodicWork(context)
-                        R.string.subscription_new
-                    } else {
-                        R.string.subscription_deleted
-                    }
-
-                    val name = (viewModel.page.value as? Resource.Success)?.value?.title
-                        ?: com.lagradost.cloudstream3.utils.txt(R.string.no_data)
-                            .asStringNull(context) ?: ""
-                    showToast(
-                        com.lagradost.cloudstream3.utils.txt(message, name),
-                        Toast.LENGTH_SHORT
-                    )
-                }
-                context?.let { openBatteryOptimizationSettings(it) }
-            }
             resultFavorite.setOnClickListener {
                 viewModel.toggleFavoriteStatus(context) { newStatus: Boolean? ->
                     if (newStatus == null) return@toggleFavoriteStatus
@@ -721,17 +660,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
         }
 
 
-        /*
-        result_bookmark_button?.setOnClickListener {
-            it.popupMenuNoIcons(
-                items = WatchType.values()
-                    .map { watchType -> Pair(watchType.internalId, watchType.stringRes) },
-                //.map { watchType -> Triple(watchType.internalId, watchType.iconRes, watchType.stringRes) },
-            ) {
-                viewModel.updateWatchStatus(WatchType.fromInternalId(this.itemId))
-            }
-        }*/
-
         observeNullable(viewModel.resumeWatching) { resume ->
             resultBinding?.apply {
                 if (resume == null) {
@@ -785,19 +713,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                     resumeAction(storedData, resume)
                 }
             }
-        }
-
-        observeNullable(viewModel.subscribeStatus) { isSubscribed ->
-            binding.resultSubscribe.isVisible = isSubscribed != null
-            if (isSubscribed == null) return@observeNullable
-
-            val drawable = if (isSubscribed) {
-                R.drawable.ic_baseline_notifications_active_24
-            } else {
-                R.drawable.baseline_notifications_none_24
-            }
-
-            binding.resultSubscribe.setImageResource(drawable)
         }
 
         observeNullable(viewModel.favoriteStatus) { isFavorite ->
@@ -1017,13 +932,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                         resultMetaContentRating.width = 0
                     }
 
-                    if (syncModel.addSyncs(d.syncData)) {
-                        syncModel.updateMetaAndUser()
-                        syncModel.updateSynced()
-                    } else {
-                        syncModel.addFromUrl(d.url)
-                    }
-
                     binding.apply {
                         resultSearch.isGone = d.title.isBlank()
                         resultSearch.setOnClickListener {
@@ -1051,10 +959,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                             }
                         }
                         setUrl(d.url)
-                        resultBookmarkFab.apply {
-                            isVisible = true
-                            extend()
-                        }
                     }
                 }
 
@@ -1063,7 +967,6 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                     resultErrorText.text = storedData.url.plus("\n") + data.errorString
                 }
 
-                binding.resultBookmarkFab.isVisible = data is Resource.Success
                 resultFinishLoading.isVisible = data is Resource.Success
 
                 resultLoading.isVisible = data is Resource.Loading
@@ -1114,194 +1017,9 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
             setTrailers(trailers.flatMap { it.mirros }) // I don't care about subtitles yet!
         }
 
-        observe(syncModel.synced) { list ->
-            syncBinding?.resultSyncNames?.text =
-                list.filter { it.isSynced && it.hasAccount }.joinToString { it.name }
-
-            val newList = list.filter { it.isSynced && it.hasAccount }
-
-            binding.resultMiniSync.isVisible = newList.isNotEmpty()
-        }
-
-
-        var currentSyncProgress = 0
-        fun setSyncMaxEpisodes(totalEpisodes: Int?) {
-            syncBinding?.resultSyncEpisodes?.max = (totalEpisodes ?: 0) * 1000
-
-            safe {
-                val ctx = syncBinding?.resultSyncEpisodes?.context
-                syncBinding?.resultSyncMaxEpisodes?.text =
-                    totalEpisodes?.let { episodes ->
-                        ctx?.getString(R.string.sync_total_episodes_some)?.format(episodes)
-                    } ?: run {
-                        ctx?.getString(R.string.sync_total_episodes_none)
-                    }
-            }
-        }
-        observe(syncModel.metadata) { meta ->
-            when (meta) {
-                is Resource.Success -> {
-                    val d = meta.value
-                    syncBinding?.resultSyncEpisodes?.progress = currentSyncProgress * 1000
-                    setSyncMaxEpisodes(d.totalEpisodes)
-
-                    viewModel.setMeta(d, syncModel.getSyncs())
-                }
-
-                is Resource.Loading -> {
-                    syncBinding?.resultSyncMaxEpisodes?.text =
-                        syncBinding?.resultSyncMaxEpisodes?.context?.getString(R.string.sync_total_episodes_none)
-                }
-
-                else -> {}
-            }
-        }
-
-
-        observe(syncModel.userData) { status ->
-            var closed = false
-            syncBinding?.apply {
-                when (status) {
-                    is Resource.Failure -> {
-                        resultSyncLoadingShimmer.stopShimmer()
-                        resultSyncLoadingShimmer.isVisible = false
-                        resultSyncHolder.isVisible = false
-                        closed = true
-                    }
-
-                    is Resource.Loading -> {
-                        resultSyncLoadingShimmer.startShimmer()
-                        resultSyncLoadingShimmer.isVisible = true
-                        resultSyncHolder.isVisible = false
-                    }
-
-                    is Resource.Success -> {
-                        resultSyncLoadingShimmer.stopShimmer()
-                        resultSyncLoadingShimmer.isVisible = false
-                        resultSyncHolder.isVisible = true
-
-                        val d = status.value
-                        val desiredScore = d.score?.toFloat(1) ?: 0.0f
-                        val totalSteps = (resultSyncRating.valueTo / resultSyncRating.stepSize)
-                        val desiredStep = (totalSteps * desiredScore).roundToInt()
-                        resultSyncRating.value = desiredStep * resultSyncRating.stepSize
-
-                        resultSyncCheck.setItemChecked(d.status.internalId + 1, true)
-                        val watchedEpisodes = d.watchedEpisodes ?: 0
-                        currentSyncProgress = watchedEpisodes
-
-                        d.maxEpisodes?.let {
-                            // don't directly call it because we don't want to override metadata observe
-                            setSyncMaxEpisodes(it)
-                        }
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            resultSyncEpisodes.setProgress(watchedEpisodes * 1000, true)
-                        } else {
-                            resultSyncEpisodes.progress = watchedEpisodes * 1000
-                        }
-                        resultSyncCurrentEpisodes.text =
-                            Editable.Factory.getInstance()?.newEditable(watchedEpisodes.toString())
-                        safe { // format might fail
-                            val text = d.score?.toFloat(10)?.roundToInt()?.let {
-                                context?.getString(R.string.sync_score_format)?.format(it)
-                            } ?: "?"
-                            resultSyncScoreText.text = text
-                        }
-                    }
-
-                    null -> {
-                        closed = false
-                    }
-                }
-            }
-            binding.resultOverlappingPanels.setStartPanelLockState(if (closed) OverlappingPanelsLayout.LockState.CLOSE else OverlappingPanelsLayout.LockState.UNLOCKED)
-        }
         observe(viewModel.recommendations) { recommendations ->
             setRecommendations(recommendations, null)
         }
-        context?.let { ctx ->
-            val arrayAdapter = ArrayAdapter<String>(ctx, R.layout.sort_bottom_single_choice)
-            /*
-            -1 -> None
-            0 -> Watching
-            1 -> Completed
-            2 -> OnHold
-            3 -> Dropped
-            4 -> PlanToWatch
-            5 -> ReWatching
-            */
-            val items = listOf(
-                R.string.none,
-                R.string.type_watching,
-                R.string.type_completed,
-                R.string.type_on_hold,
-                R.string.type_dropped,
-                R.string.type_plan_to_watch,
-                R.string.type_re_watching
-            ).map { ctx.getString(it) }
-            arrayAdapter.addAll(items)
-            syncBinding?.apply {
-                resultSyncCheck.choiceMode = AbsListView.CHOICE_MODE_SINGLE
-                resultSyncCheck.adapter = arrayAdapter
-                setListViewHeightBasedOnItems(resultSyncCheck)
-
-                resultSyncCheck.setOnItemClickListener { _, _, which, _ ->
-                    syncModel.setStatus(which - 1)
-                }
-
-                resultSyncRating.addOnChangeListener { it, value, fromUser ->
-                    if (fromUser) syncModel.setScore(Score.from(value, it.valueTo.roundToInt()))
-                }
-
-                resultSyncAddEpisode.setOnClickListener {
-                    syncModel.setEpisodesDelta(1)
-                }
-
-                resultSyncSubEpisode.setOnClickListener {
-                    syncModel.setEpisodesDelta(-1)
-                }
-
-                resultSyncCurrentEpisodes.doOnTextChanged { text, _, before, count ->
-                    if (count == before) return@doOnTextChanged
-                    text?.toString()?.toIntOrNull()?.let { ep ->
-                        syncModel.setEpisodes(ep)
-                    }
-                }
-            }
-        }
-
-        syncBinding?.resultSyncSetScore?.setOnClickListener {
-            syncModel.publishUserData()
-        }
-
-        observe(viewModel.watchStatus) { watchType ->
-            binding.resultBookmarkFab.apply {
-                setText(watchType.stringRes)
-                if (watchType == WatchType.NONE) {
-                    context?.colorFromAttribute(R.attr.white)
-                } else {
-                    context?.colorFromAttribute(R.attr.colorPrimary)
-                }?.let {
-                    val colorState = ColorStateList.valueOf(it)
-                    iconTint = colorState
-                    setTextColor(colorState)
-                }
-
-                setOnClickListener { fab ->
-                    activity?.showBottomDialog(
-                        WatchType.entries.map { fab.context.getString(it.stringRes) }.toList(),
-                        watchType.ordinal,
-                        fab.context.getString(R.string.action_add_to_bookmarks),
-                        showApply = false,
-                        {}) {
-                        viewModel.updateWatchStatus(WatchType.entries[it], context)
-                    }
-                }
-            }
-        }
-
-
         observeNullable(viewModel.loadedLinks) { load ->
             if (load == null) {
                 loadingDialog?.dismissSafe(activity)

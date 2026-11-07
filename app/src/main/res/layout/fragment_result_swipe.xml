@@ -20,7 +20,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
             <ImageView
-                    android:nextFocusRight="@id/result_mini_sync"
                     android:background="?android:attr/selectableItemBackgroundBorderless"
 
                     android:id="@+id/result_back"
@@ -34,21 +33,6 @@
                     android:contentDescription="@string/go_back"
                     app:tint="?attr/white" />
 
-            <ImageView
-                android:visibility="gone"
-                android:nextFocusRight="@id/result_subscribe"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-
-                android:id="@+id/result_mini_sync"
-                android:clickable="true"
-                android:focusable="true"
-
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_marginStart="5dp"
-                android:layout_gravity="center_vertical|start"
-                android:src="@drawable/bookmark_star_24px"
-                app:tint="?attr/white" />
         </LinearLayout>
 
         <LinearLayout
@@ -69,29 +53,8 @@
                     app:mediaRouteButtonTint="?attr/textColor" />
 
             <ImageView
-                    android:visibility="gone"
-                    android:nextFocusUp="@id/result_back"
-                    android:nextFocusDown="@id/result_description"
-                    android:nextFocusLeft="@id/result_add_sync"
-                    android:nextFocusRight="@id/result_favorite"
-
-                    tools:visibility="visible"
-
-                    android:id="@+id/result_subscribe"
-                    android:layout_width="25dp"
-                    android:layout_height="25dp"
-                    android:layout_margin="5dp"
-                    android:elevation="10dp"
-                    android:tooltipText="@string/subscribe_tooltip"
-                    android:background="?android:attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/baseline_notifications_none_24"
-                    android:layout_gravity="end|center_vertical"
-                    app:tint="?attr/textColor" />
-
-            <ImageView
                 android:nextFocusUp="@id/result_back"
                 android:nextFocusDown="@id/result_description"
-                android:nextFocusLeft="@id/result_subscribe"
                 android:nextFocusRight="@id/result_share"
 
                 android:id="@+id/result_favorite"
@@ -205,7 +168,6 @@
                     android:layout_height="match_parent"
                     android:layout_gravity="start">
 
-                <include layout="@layout/result_sync" android:id="@+id/result_sync"/>
             </FrameLayout>
 
             <FrameLayout
@@ -234,14 +196,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
-
-            <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-                    android:visibility="gone"
-                    tools:visibility="visible"
-                    android:id="@+id/result_bookmark_fab"
-                    app:icon="@drawable/ic_baseline_bookmark_24"
-                    style="@style/ExtendedFloatingActionButton"
-                    tools:ignore="ContentDescription" />
 
             <fragment
                     app:customCastBackgroundColor="?attr/primaryBlackBackground"

@@ -18,8 +18,6 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import androidx.viewpager2.widget.ViewPager2
 import android.widget.Toast
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarItemView
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
@@ -39,7 +37,6 @@ import com.lagradost.cloudstream3.mvvm.debugException
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.observe
 import com.lagradost.cloudstream3.ui.ViewHolderState
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountEditDialog
 import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountSelectLinear
 import com.lagradost.cloudstream3.ui.account.AccountViewModel
@@ -47,7 +44,6 @@ import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
 import com.lagradost.cloudstream3.ui.result.ResultFragment.bindLogo
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
-import com.lagradost.cloudstream3.ui.result.getId
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_SHOW_METADATA
@@ -59,7 +55,6 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
-import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showOptionSelectStringRes
 import com.lagradost.cloudstream3.utils.UIHelper.fixPaddingStatusbarMargin
 import com.lagradost.cloudstream3.utils.UIHelper.fixPaddingStatusbarView
@@ -91,15 +86,6 @@ class HomeParentItemAdapterPreview(
         ) else FragmentHomeHeadBinding.inflate(inflater, parent, false)
 
         if (binding is FragmentHomeHeadTvBinding && isLayout(EMULATOR)) {
-            binding.homeBookmarkParentItemMoreInfo.isVisible = true
-
-            val marginInDp = 50
-            val density = binding.horizontalScrollChips.context.resources.displayMetrics.density
-            val marginInPixels = (marginInDp * density).toInt()
-
-            val params = binding.horizontalScrollChips.layoutParams as ViewGroup.MarginLayoutParams
-            params.marginEnd = marginInPixels
-            binding.horizontalScrollChips.layoutParams = params
             binding.homeWatchParentItemTitle.setCompoundDrawablesWithIntrinsicBounds(
                 null,
                 null,
@@ -147,19 +133,12 @@ class HomeParentItemAdapterPreview(
                     "resumeRecyclerView",
                     resumeRecyclerView.layoutManager?.onSaveInstanceState()
                 )
-                putParcelable(
-                    "bookmarkRecyclerView",
-                    bookmarkRecyclerView.layoutManager?.onSaveInstanceState()
-                )
                 //putInt("previewViewpager", previewViewpager.currentItem)
             }
 
         override fun restore(state: Bundle) {
             state.getSafeParcelable<Parcelable>("resumeRecyclerView")?.let { recycle ->
                 resumeRecyclerView.layoutManager?.onRestoreInstanceState(recycle)
-            }
-            state.getSafeParcelable<Parcelable>("bookmarkRecyclerView")?.let { recycle ->
-                bookmarkRecyclerView.layoutManager?.onRestoreInstanceState(recycle)
             }
         }
 
@@ -339,68 +318,6 @@ class HomeParentItemAdapterPreview(
             landscapeScale = 0.8f
         }
 
-        private val bookmarkAdapter = HomeChildItemAdapter(
-            id = "bookmarkAdapter".hashCode(),
-            nextFocusUp = itemView.nextFocusUpId,
-            nextFocusDown = itemView.nextFocusDownId
-        ) { callback ->
-            if (callback.action != SEARCH_ACTION_SHOW_METADATA) {
-                viewModel.click(callback)
-                return@HomeChildItemAdapter
-            }
-
-            (callback.view.context?.getActivity() as? MainActivity)?.loadPopup(
-                callback.card,
-                load = false
-            )
-            /*
-            callback.view.context?.getActivity()?.showOptionSelectStringRes(
-                callback.view,
-                callback.card.posterUrl,
-                listOf(
-                    R.string.action_open_watching,
-                    R.string.action_remove_from_bookmarks,
-                ),
-                listOf(
-                    R.string.action_open_play,
-                    R.string.action_open_watching,
-                    R.string.action_remove_from_bookmarks
-                )
-            ) { (isTv, actionId) ->
-                when (actionId + if (isTv) 0 else 1) { // play
-                    0 -> {
-                        viewModel.click(
-                            SearchClickCallback(
-                                START_ACTION_RESUME_LATEST,
-                                callback.view,
-                                -1,
-                                callback.card
-                            )
-                        )
-                    }
-
-                    1 -> { // info
-                        viewModel.click(
-                            SearchClickCallback(
-                                SEARCH_ACTION_LOAD,
-                                callback.view,
-                                -1,
-                                callback.card
-                            )
-                        )
-                    }
-
-                    2 -> { // remove
-                        DataStoreHelper.setResultWatchState(
-                            callback.card.id,
-                            WatchType.NONE.internalId
-                        )
-                        viewModel.reloadStored()
-                    }
-                }
-            }
-            */
-        }
 private val previewViewpager: ViewPager2 =
     itemView.findViewById(R.id.home_preview_viewpager)
 
@@ -422,12 +339,6 @@ private val cricketHolder: View =
 
 private val cricketRecyclerView: RecyclerView =
     itemView.findViewById(R.id.home_cricket_child_recyclerview)
-
-private val bookmarkHolder: View =
-    itemView.findViewById(R.id.home_bookmarked_holder)
-
-private val bookmarkRecyclerView: RecyclerView =
-    itemView.findViewById(R.id.home_bookmarked_child_recyclerview)
 
 private val headProfilePic: ImageView? =
     itemView.findViewById(R.id.home_head_profile_pic)
@@ -546,52 +457,6 @@ private val homeNonePadding: View =
                     )
                 }
 
-                // very ugly code, but I don't care
-                val id = item.getId()
-                val watchType =
-                    DataStoreHelper.getResultWatchState(id)
-                homePreviewBookmark.setText(watchType.stringRes)
-                homePreviewBookmark.setCompoundDrawablesWithIntrinsicBounds(
-                    null,
-                    ContextCompat.getDrawable(
-                        homePreviewBookmark.context,
-                        watchType.iconRes
-                    ),
-                    null,
-                    null
-                )
-
-                homePreviewBookmark.setOnClickListener { fab ->
-                    fab.context.getActivity()?.showBottomDialog(
-                        WatchType.entries
-                            .map { fab.context.getString(it.stringRes) }
-                            .toList(),
-                        DataStoreHelper.getResultWatchState(id).ordinal,
-                        fab.context.getString(R.string.action_add_to_bookmarks),
-                        showApply = false,
-                        {}) {
-                        val newValue = WatchType.entries[it]
-
-                        ResultViewModel2().updateWatchStatus(
-                            newValue,
-                            fab.context,
-                            item
-                        ) { statusChanged: Boolean ->
-                            if (!statusChanged) return@updateWatchStatus
-
-                            homePreviewBookmark.setCompoundDrawablesWithIntrinsicBounds(
-                                null,
-                                ContextCompat.getDrawable(
-                                    homePreviewBookmark.context,
-                                    newValue.iconRes
-                                ),
-                                null,
-                                null
-                            )
-                            homePreviewBookmark.setText(newValue.stringRes)
-                        }
-                    }
-                }
             }
         }
 
@@ -613,16 +478,6 @@ private val homeNonePadding: View =
             previewViewpager.unregisterOnPageChangeCallback(previewCallback)
         }
 
-        private val toggleList = listOf<Pair<Chip, WatchType>>(
-            Pair(itemView.findViewById(R.id.home_type_watching_btt), WatchType.WATCHING),
-            Pair(itemView.findViewById(R.id.home_type_completed_btt), WatchType.COMPLETED),
-            Pair(itemView.findViewById(R.id.home_type_dropped_btt), WatchType.DROPPED),
-            Pair(itemView.findViewById(R.id.home_type_on_hold_btt), WatchType.ONHOLD),
-            Pair(itemView.findViewById(R.id.home_plan_to_watch_btt), WatchType.PLANTOWATCH),
-        )
-
-        private val toggleListHolder: ChipGroup? = itemView.findViewById(R.id.home_type_holder)
-
         fun bind() {
     headReloadProvider?.setOnClickListener {
         viewModel.reloadHomeFromUI()
@@ -635,9 +490,6 @@ private val homeNonePadding: View =
             previewViewpager.adapter = previewAdapter
             resumeRecyclerView.adapter = resumeAdapter
             cricketRecyclerView.adapter = cricketAdapter
-            bookmarkRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
-            bookmarkRecyclerView.adapter = bookmarkAdapter
-
             cricketRecyclerView.setLinearListLayout(
                 nextLeft = R.id.nav_rail_view,
                 nextRight = FOCUS_SELF
@@ -648,25 +500,7 @@ private val homeNonePadding: View =
                 nextRight = FOCUS_SELF
             )
 
-            bookmarkRecyclerView.setLinearListLayout(
-                nextLeft = R.id.nav_rail_view,
-                nextRight = FOCUS_SELF
-            )
-
             fixPaddingStatusbarMargin(topPadding)
-
-            for ((chip, watch) in toggleList) {
-                chip.isChecked = false
-                chip.setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked) {
-                        viewModel.loadStoredData(setOf(watch))
-                    }
-                    // Else if all are unchecked -> Do not load data
-                    else if (toggleList.all { !it.first.isChecked }) {
-                        viewModel.loadStoredData(emptySet())
-                    }
-                }
-            }
 
             headProfilePicCard?.isGone = isLayout(TV or EMULATOR)
             alternateHeadProfilePicCard?.isGone = isLayout(TV or EMULATOR)
@@ -924,11 +758,11 @@ private val homeNonePadding: View =
             }
 
             if (isLayout(TV or EMULATOR)) {
-                // Keep d-pad navigation in visual order on TV: watch -> cricket -> bookmarks.
+                // Keep d-pad navigation in visual order on TV: watch -> cricket -> home rows.
                 resumeRecyclerView.nextFocusDownId = if (show) {
                     R.id.home_cricket_child_recyclerview
                 } else {
-                    R.id.home_type_holder
+                    R.id.home_child_recyclerview
                 }
             }
         }
@@ -962,40 +796,6 @@ private val homeNonePadding: View =
             }
         }
 
-        private fun updateBookmarks(data: Pair<Boolean, List<SearchResponse>>) {
-            val (visible, list) = data
-            bookmarkHolder.isVisible = visible
-            bookmarkAdapter.submitList(list)
-
-            if (
-                binding is FragmentHomeHeadBinding ||
-                binding is FragmentHomeHeadTvBinding &&
-                isLayout(EMULATOR)
-            ) {
-                val title = (binding as? FragmentHomeHeadBinding)?.homeBookmarkParentItemTitle
-                    ?: (binding as? FragmentHomeHeadTvBinding)?.homeBookmarkParentItemTitle
-
-                title?.setOnClickListener {
-                    val items = toggleList.map { it.first }.filter { it.isChecked }
-                    if (items.isEmpty()) return@setOnClickListener // we don't want to show an empty dialog
-                    val textSum = items
-                        .mapNotNull { it.text }.joinToString()
-
-                    viewModel.popup(
-                        HomeViewModel.ExpandableHomepageList(
-                            HomePageList(
-                                textSum,
-                                list,
-                                false
-                            ), 1, false
-                        ), deleteCallback = {
-                            viewModel.deleteBookmarks(list)
-                        }
-                    )
-                }
-            }
-        }
-
         fun onViewAttachedToWindow() {
             previewViewpager.registerOnPageChangeCallback(previewCallback)
             startAutoSlide()
@@ -1015,18 +815,6 @@ private val homeNonePadding: View =
                 }
                 observe(viewModel.cricketLive) {
                     updateCricketLive(it)
-                }
-                observe(viewModel.bookmarks) {
-                    updateBookmarks(it)
-                }
-                observe(viewModel.availableWatchStatusTypes) { (checked, visible) ->
-                    for ((chip, watch) in toggleList) {
-                        chip.apply {
-                            isVisible = visible.contains(watch)
-                            isChecked = checked.contains(watch)
-                        }
-                    }
-                    toggleListHolder?.isGone = visible.isEmpty()
                 }
             }
         }

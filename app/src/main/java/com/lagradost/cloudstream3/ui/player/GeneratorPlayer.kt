@@ -101,7 +101,6 @@ import com.lagradost.cloudstream3.ui.result.ResultFragment
 import com.lagradost.cloudstream3.ui.result.ResultFragment.bindLogo
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_PLAY_EPISODE_FROM_SOURCE
-import com.lagradost.cloudstream3.ui.result.SyncViewModel
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
@@ -145,7 +144,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.Serializable
 import java.lang.ref.WeakReference
 import java.util.Calendar
 import java.util.UUID
@@ -170,16 +168,13 @@ class GeneratorPlayer : FullScreenPlayer() {
         fun newInstance(
             generator: VideoGenerator<*>,
             index: Int,
-            syncData: HashMap<String, String>? = null,
             incognito: Boolean = false
         ): Bundle {
-            Log.i(TAG, "newInstance = $syncData")
             val uuid = UUID.randomUUID().toString()
             generators[uuid] = generator
             return Bundle().apply {
                 putString("uuid", uuid)
                 putInt("index", index)
-                if (syncData != null) putSerializable("syncData", syncData)
                 putBoolean("incognito", incognito)
             }
         }
@@ -197,7 +192,6 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var showMediaInfo = false
 
     private lateinit var viewModel: PlayerGeneratorViewModel //by activityViewModels()
-    private lateinit var sync: SyncViewModel
 
     private var currentSelectedLink: Pair<ExtractorLink?, ExtractorUri?>? = null
     /** In-flight re-resolution of an expired authorized stream; cancelled in onDestroy. */
@@ -2295,7 +2289,6 @@ class GeneratorPlayer : FullScreenPlayer() {
         super.onDestroy()
     }
 
-    var maxEpisodeSet: Int? = null
     var hasRequestedStamps: Boolean = false
     override fun playerPositionChanged(position: Long, duration: Long) {
         // Live streams have no meaningful progress. The Continue Watching entry is kept in
@@ -2347,21 +2340,6 @@ class GeneratorPlayer : FullScreenPlayer() {
         var isOpVisible = false
         when (val meta = currentMeta) {
             is ResultEpisode -> {
-                if (!isIncognito && percentage >= UPDATE_SYNC_PROGRESS_PERCENTAGE && (maxEpisodeSet
-                        ?: -1) < meta.episode
-                ) {
-                    context?.let { ctx ->
-                        val settingsManager = PreferenceManager.getDefaultSharedPreferences(ctx)
-                        if (settingsManager.getBoolean(
-                                ctx.getString(R.string.episode_sync_enabled_key), true
-                            )
-                        ) {
-                            maxEpisodeSet = meta.episode
-                            sync.modifyMaxEpisode(meta.totalEpisodeIndex ?: meta.episode)
-                        }
-                    }
-                }
-
                 if (meta.tvType.isAnimeOp()) isOpVisible = percentage < SKIP_OP_VIDEO_PERCENTAGE
             }
         }
@@ -2637,13 +2615,6 @@ class GeneratorPlayer : FullScreenPlayer() {
         setPlayerDimen(width to height)
     }
 
-    private fun unwrapBundle(savedInstanceState: Bundle?) {
-        Log.i(TAG, "unwrapBundle = $savedInstanceState")
-        savedInstanceState?.let { bundle ->
-            sync.addSyncs(bundle.getSafeSerializable<HashMap<String, String>>("syncData"))
-        }
-    }
-
     /**
      * This is used instead of layout-television to follow the
      * settings and some TV devices are not classified as TV
@@ -2860,16 +2831,12 @@ fun closePlayerForActivityDestroy() {
 
     override fun onBindingCreated(binding: FragmentPlayerBinding, savedInstanceState: Bundle?) {
         viewModel = ViewModelProvider(this)[PlayerGeneratorViewModel::class.java]
-        sync = ViewModelProvider(this)[SyncViewModel::class.java]
 
         val uuid = savedInstanceState?.getString("uuid") ?: arguments?.getString("uuid")
         val index = savedInstanceState?.getInt("index") ?: arguments?.getInt("index")
         isIncognito = savedInstanceState?.getBoolean("incognito")
             ?: arguments?.getBoolean("incognito") ?: false
         val generator = generators[uuid]
-
-        unwrapBundle(savedInstanceState)
-        unwrapBundle(arguments)
 
         super.onBindingCreated(binding, savedInstanceState)
 
@@ -2908,11 +2875,6 @@ fun closePlayerForActivityDestroy() {
                 playerBinding?.playerVideoClock?.isVisible = false
             }
         }
-
-        unwrapBundle(savedInstanceState)
-        unwrapBundle(arguments)
-
-        sync.updateUserData()
 
         preferredAutoSelectSubtitles = getAutoSelectLanguageTagIETF()
 
@@ -3031,10 +2993,3 @@ fun closePlayerForActivityDestroy() {
         }
     }
 }
-
-@Suppress("DEPRECATION")
-inline fun <reified T : Serializable> Bundle.getSafeSerializable(key: String): T? =
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) getSerializable(key) as? T else getSerializable(
-        key,
-        T::class.java
-    )

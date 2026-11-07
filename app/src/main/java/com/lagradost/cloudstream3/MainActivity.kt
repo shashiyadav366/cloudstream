@@ -94,7 +94,6 @@ import com.lagradost.cloudstream3.plugins.PluginManager.loadSinglePlugin
 import android.content.ClipData
 import android.content.ClipboardManager
 import com.lagradost.cloudstream3.receivers.VideoDownloadRestartReceiver
-import com.lagradost.cloudstream3.services.SubscriptionWorkManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_PLAYER
@@ -103,10 +102,7 @@ import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STR
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_SEARCH
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_SHARE
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.localListApi
-import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.ui.APIRepository
-import com.lagradost.cloudstream3.ui.SyncWatchType
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountSelectLinear
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_NAVIGATE_TO
 import com.lagradost.cloudstream3.ui.home.HomeViewModel
@@ -117,7 +113,6 @@ import com.lagradost.cloudstream3.ui.player.LinkGenerator
 import com.lagradost.cloudstream3.ui.result.LinearListLayout
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
-import com.lagradost.cloudstream3.ui.result.SyncViewModel
 import com.lagradost.cloudstream3.ui.search.SearchFragment
 import com.lagradost.cloudstream3.ui.search.SearchResultBuilder
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
@@ -303,13 +298,15 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             Event<Boolean>() // homepage api, used to speed up time to load for homepage
         val afterRepositoryLoadedEvent = Event<Boolean>()
 
-        // kinda shitty solution, but cant com main->home otherwise for popups
-        val bookmarksUpdatedEvent = Event<Boolean>()
-
         /**
          * Used by DataStoreHelper to fully reload home when switching accounts
          */
         val reloadHomeEvent = Event<Boolean>()
+
+        /**
+         * Used to refresh only the locally stored home rows, such as Continue Watching.
+         */
+        val reloadStoredEvent = Event<Boolean>()
 
         /**
          * Used by DataStoreHelper to fully reload library when switching accounts
@@ -500,18 +497,6 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
     var lastPopupJob: Job? = null
     fun loadPopup(result: SearchResponse, load: Boolean = true) {
         lastPopup = result
-        val syncName = syncViewModel.syncName(result.apiName)
-
-        // based on apiName we decide on if it is a local list or not, this is because
-        // we want to show a bit of extra UI to sync apis
-        if (result is SyncAPI.LibraryItem && syncName != null) {
-            isLocalList = false
-            syncViewModel.setSync(syncName, result.syncId)
-            syncViewModel.updateMetaAndUser()
-        } else {
-            isLocalList = true
-            syncViewModel.clear()
-        }
 
         lastPopupJob?.cancel()
         lastPopupJob = if (load) {
@@ -959,15 +944,11 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
     }
 
     lateinit var viewModel: ResultViewModel2
-    lateinit var syncViewModel: SyncViewModel
     private var libraryViewModel: LibraryViewModel? = null
 
-    /** kinda dirty, however it signals that we should use the watch status as sync or not*/
-    var isLocalList: Boolean = false
     override fun onCreateView(name: String, context: Context, attrs: AttributeSet): View? {
 
         viewModel = ViewModelProvider(this)[ResultViewModel2::class.java]
-        syncViewModel = ViewModelProvider(this)[SyncViewModel::class.java]
 
         return super.onCreateView(name, context, attrs)
     }
@@ -1377,9 +1358,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                         R.id.result_play_series_button,
                         R.id.result_resume_series_button,
                         R.id.result_play_trailer_button,
-                        R.id.result_bookmark_Button,
                         R.id.result_favorite_Button,
-                        R.id.result_subscribe_Button,
                         R.id.result_search_Button,
                         R.id.result_episodes_show_button,
                     )
@@ -1548,76 +1527,31 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             builder.show().setDefaultFocus()
         }
 
-        fun setUserData(status: Resource<SyncAPI.AbstractSyncStatus>?) {
-            if (isLocalList) return
-            bottomPreviewBinding?.apply {
-                when (status) {
-                    is Resource.Success -> {
-                        resultviewPreviewBookmark.isEnabled = true
-                        resultviewPreviewBookmark.setText(status.value.status.stringRes)
-                        resultviewPreviewBookmark.setIconResource(status.value.status.iconRes)
-                    }
-
-                    is Resource.Failure -> {
-                        resultviewPreviewBookmark.isEnabled = false
-                        resultviewPreviewBookmark.setIconResource(R.drawable.ic_baseline_bookmark_border_24)
-                        resultviewPreviewBookmark.text = status.errorString
-                    }
-
-                    else -> {
-                        resultviewPreviewBookmark.isEnabled = false
-                        resultviewPreviewBookmark.showProgress()
-                        //resultviewPreviewBookmark.setIconResource(R.drawable.ic_baseline_bookmark_border_24)
-                        //resultviewPreviewBookmark.setText(R.string.loading)
-                    }
-                }
-            }
-        }
-
-        fun setWatchStatus(state: WatchType?) {
-            if (!isLocalList || state == null) return
-
-            bottomPreviewBinding?.resultviewPreviewBookmark?.apply {
-                setIconResource(state.iconRes)
-                setText(state.stringRes)
-            }
-        }
-
-        fun setSubscribeStatus(state: Boolean?) {
-            bottomPreviewBinding?.resultviewPreviewSubscribe?.apply {
-                if (state != null) {
-                    val drawable = if (state) {
-                        R.drawable.ic_baseline_notifications_active_24
+        fun setContinueWatchingButton() {
+            bottomPreviewBinding?.resultviewPreviewContinueWatching?.apply {
+                isVisible = viewModel.hasPlayableContent()
+                if (!isVisible) return@apply
+                val isInContinueWatching = viewModel.isCurrentInContinueWatching()
+                setText(
+                    if (isInContinueWatching) {
+                        R.string.remove_from_continue_watching
                     } else {
-                        R.drawable.baseline_notifications_none_24
+                        R.string.episode_action_add_to_continue_watching
                     }
-                    setImageResource(drawable)
-                }
-                isVisible = state != null
-
-                setOnClickListener {
-                    viewModel.toggleSubscriptionStatus(context) { newStatus: Boolean? ->
-                        if (newStatus == null) return@toggleSubscriptionStatus
-
-                        val message = if (newStatus) {
-                            // Kinda icky to have this here, but it works.
-                            SubscriptionWorkManager.enqueuePeriodicWork(context)
-                            R.string.subscription_new
-                        } else {
-                            R.string.subscription_deleted
-                        }
-
-                        val name = (viewModel.page.value as? Resource.Success)?.value?.title
-                            ?: txt(R.string.no_data).asStringNull(context) ?: ""
-                        showToast(txt(message, name), Toast.LENGTH_SHORT)
+                )
+                setIconResource(
+                    if (isInContinueWatching) {
+                        R.drawable.baseline_remove_24
+                    } else {
+                        R.drawable.ic_baseline_playlist_play_24
                     }
-                }
+                )
             }
         }
 
-        observe(viewModel.watchStatus, ::setWatchStatus)
-        observe(syncViewModel.userData, ::setUserData)
-        observeNullable(viewModel.subscribeStatus, ::setSubscribeStatus)
+        observeNullable(viewModel.episodes) {
+            setContinueWatchingButton()
+        }
 
         observeNullable(viewModel.page) { resource ->
             if (resource == null) {
@@ -1666,41 +1600,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                             )
                         }
 
-                        setUserData(syncViewModel.userData.value)
-                        setWatchStatus(viewModel.watchStatus.value)
-                        setSubscribeStatus(viewModel.subscribeStatus.value)
-
-                        resultviewPreviewBookmark.setOnClickListener {
-                            //viewModel.updateWatchStatus(WatchType.PLANTOWATCH)
-                            if (isLocalList) {
-                                val value = viewModel.watchStatus.value ?: WatchType.NONE
-
-                                this@MainActivity.showBottomDialog(
-                                    WatchType.entries.map { getString(it.stringRes) }.toList(),
-                                    value.ordinal,
-                                    this@MainActivity.getString(R.string.action_add_to_bookmarks),
-                                    showApply = false,
-                                    {}) {
-                                    viewModel.updateWatchStatus(
-                                        WatchType.entries[it],
-                                        this@MainActivity
-                                    )
-                                }
-                            } else {
-                                val value =
-                                    (syncViewModel.userData.value as? Resource.Success)?.value?.status
-                                        ?: SyncWatchType.NONE
-
-                                this@MainActivity.showBottomDialog(
-                                    SyncWatchType.entries.map { getString(it.stringRes) }.toList(),
-                                    value.ordinal,
-                                    this@MainActivity.getString(R.string.action_add_to_bookmarks),
-                                    showApply = false,
-                                    {}) {
-                                    syncViewModel.setStatus(SyncWatchType.entries[it].internalId)
-                                    syncViewModel.publishUserData()
-                                }
-                            }
+                        setContinueWatchingButton()
+                        resultviewPreviewContinueWatching.setOnClickListener {
+                            viewModel.toggleCurrentContinueWatching()
+                            setContinueWatchingButton()
                         }
 
                         observeNullable(viewModel.favoriteStatus) observeFavoriteStatus@{ isFavorite ->

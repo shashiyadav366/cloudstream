@@ -71,7 +71,6 @@ import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.seconds
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
 import com.lagradost.cloudstream3.ui.APIRepository
-import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.LOADTYPE_ALL
@@ -98,32 +97,21 @@ import com.lagradost.cloudstream3.utils.DataStore.getFolderName
 import com.lagradost.cloudstream3.utils.DataStore.setKey
 import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.DataStoreHelper.currentAccount
-import com.lagradost.cloudstream3.utils.DataStoreHelper.deleteBookmarkedData
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllFavorites
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllSubscriptions
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getDub
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getFavoritesData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getLastWatched
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getResultEpisode
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getResultSeason
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getResultWatchState
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getSubscribedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getVideoWatchState
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
 import com.lagradost.cloudstream3.utils.DataStoreHelper.removeFavoritesData
-import com.lagradost.cloudstream3.utils.DataStoreHelper.removeSubscribedData
-import com.lagradost.cloudstream3.utils.DataStoreHelper.setBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setDub
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setFavoritesData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setLastWatched
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultEpisode
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultSeason
-import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultWatchState
-import com.lagradost.cloudstream3.utils.DataStoreHelper.setSubscribedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setVideoWatchState
-import com.lagradost.cloudstream3.utils.DataStoreHelper.updateSubscribedData
 import com.lagradost.cloudstream3.utils.Editor
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -204,12 +192,6 @@ data class CheckDuplicateData(
     val year: Int?,
     val syncData: Map<String, String>?
 )
-
-enum class LibraryListType {
-    BOOKMARKS,
-    FAVORITES,
-    SUBSCRIPTIONS
-}
 
 enum class EpisodeSortType {
     NUMBER_ASC,
@@ -467,6 +449,70 @@ class ResultViewModel2 : ViewModel() {
         _page.postValue(null)
     }
 
+    /** Whether the currently previewed card is already in Continue Watching. */
+    fun isCurrentInContinueWatching(): Boolean {
+        val response = currentResponse ?: return false
+        val id = currentId ?: response.getId()
+        val sourcePlugin = currentSourcePlugin ?: (response as? LoadResponseFromSearch)?.sourcePlugin
+        return DataStoreHelper.getLastWatched(id, sourcePlugin) != null
+    }
+
+    /** Whether the currently previewed card has a playable source. */
+    fun hasPlayableContent(): Boolean {
+        val response = currentResponse ?: return false
+        return if (response.isMovie()) {
+            (_movie.value as? Resource.Success)?.value?.second != null
+        } else {
+            currentEpisodes.isNotEmpty() ||
+                (_episodes.value as? Resource.Success)?.value?.isNotEmpty() == true
+        }
+    }
+
+    /** Adds the previewed card to Continue Watching, or removes it if already present. */
+    fun toggleCurrentContinueWatching() {
+        if (!DataStoreHelper.isWatchHistoryEnabled()) {
+            showToast(R.string.watch_history_disabled, Toast.LENGTH_SHORT)
+            return
+        }
+        if (!hasPlayableContent()) {
+            return
+        }
+        val response = currentResponse ?: return
+        val id = currentId ?: response.getId()
+        val sourcePlugin = currentSourcePlugin ?: (response as? LoadResponseFromSearch)?.sourcePlugin
+
+        if (DataStoreHelper.getLastWatched(id, sourcePlugin) != null) {
+            DataStoreHelper.removeLastWatched(id, sourcePlugin)
+            MainActivity.reloadStoredEvent(true)
+            showToast(R.string.removed_from_continue_watching, Toast.LENGTH_SHORT)
+            return
+        }
+
+        setKey(
+            DOWNLOAD_HEADER_CACHE,
+            DataStoreHelper.headerCacheKey(id, sourcePlugin),
+            DownloadObjects.DownloadHeaderCached(
+                apiName = response.apiName,
+                url = response.url,
+                type = response.type,
+                name = response.name,
+                poster = response.posterUrl,
+                id = id,
+                cacheTime = System.currentTimeMillis(),
+            )
+        )
+        DataStoreHelper.setLastWatched(
+            parentId = id,
+            episodeId = null,
+            episode = null,
+            season = null,
+            isFromDownload = false,
+            sourcePlugin = sourcePlugin,
+        )
+        MainActivity.reloadStoredEvent(true)
+        showToast(R.string.added_to_continue_watching, Toast.LENGTH_SHORT)
+    }
+
     data class EpisodeIndexer(
         val dubStatus: DubStatus,
         val season: Int,
@@ -573,9 +619,6 @@ class ResultViewModel2 : ViewModel() {
 
     private val _episodeSynopsis: MutableLiveData<String?> = MutableLiveData(null)
     val episodeSynopsis: LiveData<String?> = _episodeSynopsis
-
-    private val _subscribeStatus: MutableLiveData<Boolean?> = MutableLiveData(null)
-    val subscribeStatus: LiveData<Boolean?> = _subscribeStatus
 
     private val _favoriteStatus: MutableLiveData<Boolean?> = MutableLiveData(null)
     val favoriteStatus: LiveData<Boolean?> = _favoriteStatus
@@ -733,88 +776,8 @@ class ResultViewModel2 : ViewModel() {
         }
     }
 
-    private val _watchStatus: MutableLiveData<WatchType> = MutableLiveData(WatchType.NONE)
-    val watchStatus: LiveData<WatchType> get() = _watchStatus
-
     private val _selectPopup: MutableLiveData<SelectPopup?> = MutableLiveData(null)
     val selectPopup: LiveData<SelectPopup?> = _selectPopup
-
-    fun updateWatchStatus(
-        status: WatchType,
-        context: Context?,
-        loadResponse: LoadResponse? = null,
-        statusChangedCallback: ((statusChanged: Boolean) -> Unit)? = null
-    ) {
-        val (response, currentId) = loadResponse?.let { load ->
-            (load to load.getId())
-        } ?: ((currentResponse ?: return) to (currentId ?: return))
-
-        val currentStatus = getResultWatchState(currentId)
-
-        // If the current status is "NONE" and the new status is not "NONE",
-        // fetch the bookmarked data to check for duplicates, otherwise set this
-        // to an empty list, so that we don't show the duplicate warning dialog,
-        // but we still want to update the current bookmark and refresh the data anyway.
-        val bookmarkedData = if (currentStatus == WatchType.NONE && status != WatchType.NONE) {
-            getAllBookmarkedData()
-        } else emptyList()
-
-        checkAndWarnDuplicates(
-            context,
-            LibraryListType.BOOKMARKS,
-            CheckDuplicateData(
-                name = response.name,
-                year = response.year,
-                syncData = response.syncData,
-            ),
-            bookmarkedData
-        ) { shouldContinue: Boolean, duplicateIds: List<Int?> ->
-            if (!shouldContinue) return@checkAndWarnDuplicates
-
-            if (duplicateIds.isNotEmpty()) {
-                duplicateIds.forEach { duplicateId ->
-                    deleteBookmarkedData(duplicateId)
-                }
-            }
-
-            setResultWatchState(currentId, status.internalId)
-
-            // We don't need to store if WatchType.NONE.
-            // The key is removed in setResultWatchState, we don't want to
-            // re-add it again here if it was just removed.
-            if (status != WatchType.NONE) {
-                val current = getBookmarkedData(currentId)
-
-                setBookmarkedData(
-                    currentId,
-                    DataStoreHelper.BookmarkedData(
-                        current?.bookmarkedTime ?: unixTimeMS,
-                        currentId,
-                        unixTimeMS,
-                        response.name,
-                        response.url,
-                        response.apiName,
-                        response.type,
-                        response.posterUrl,
-                        response.year,
-                        response.syncData,
-                        plot = response.plot,
-                        tags = response.tags,
-                        score = response.score
-                    )
-                )
-            }
-
-            if (currentStatus != status) {
-                MainActivity.bookmarksUpdatedEvent(true)
-                MainActivity.reloadLibraryEvent(true)
-            }
-
-            _watchStatus.postValue(status)
-
-            statusChangedCallback?.invoke(true)
-        }
-    }
 
     private fun startChromecast(
         activity: Activity?,
@@ -829,83 +792,6 @@ class ResultViewModel2 : ViewModel() {
             isCasting = true
         ) { data ->
             startChromecast(activity, result, data.links, data.subs, 0)
-        }
-    }
-
-    /**
-     * Toggles the subscription status of an item.
-     *
-     * @param context The context to use for operations.
-     * @param statusChangedCallback A callback that is invoked when the subscription status changes.
-     *        It provides the new subscription status (true if subscribed, false if unsubscribed, null if action was canceled).
-     */
-    fun toggleSubscriptionStatus(
-        context: Context?,
-        statusChangedCallback: ((newStatus: Boolean?) -> Unit)? = null
-    ) {
-        val isSubscribed = _subscribeStatus.value ?: return
-        val response = currentResponse ?: return
-        val currentId = currentId ?: return
-
-        // This might be a bit confusing, but even if the loadresponse is not a EpisodeResponse
-        // _subscribeStatus might be true.
-
-        if (isSubscribed) {
-            removeSubscribedData(currentId)
-            statusChangedCallback?.invoke(false)
-            _subscribeStatus.postValue(if (response is EpisodeResponse) false else null)
-            MainActivity.reloadLibraryEvent(true)
-        } else {
-            if (response !is EpisodeResponse) {
-                return
-            }
-            checkAndWarnDuplicates(
-                context,
-                LibraryListType.SUBSCRIPTIONS,
-                CheckDuplicateData(
-                    name = response.name,
-                    year = response.year,
-                    syncData = response.syncData,
-                ),
-                getAllSubscriptions(),
-            ) { shouldContinue: Boolean, duplicateIds: List<Int?> ->
-                if (!shouldContinue) {
-                    statusChangedCallback?.invoke(null)
-                    return@checkAndWarnDuplicates
-                }
-
-                if (duplicateIds.isNotEmpty()) {
-                    duplicateIds.forEach { duplicateId ->
-                        removeSubscribedData(duplicateId)
-                    }
-                }
-
-                val current = getSubscribedData(currentId)
-
-                setSubscribedData(
-                    currentId,
-                    DataStoreHelper.SubscribedData(
-                        current?.subscribedTime ?: unixTimeMS,
-                        response.getLatestEpisodes(),
-                        currentId,
-                        unixTimeMS,
-                        response.name,
-                        response.url,
-                        response.apiName,
-                        response.type,
-                        response.posterUrl,
-                        response.year,
-                        response.syncData,
-                        plot = response.plot,
-                        score = response.score,
-                        tags = response.tags
-                    )
-                )
-
-                _subscribeStatus.postValue(true)
-                statusChangedCallback?.invoke(true)
-                MainActivity.reloadLibraryEvent(true)
-            }
         }
     }
 
@@ -955,7 +841,6 @@ class ResultViewModel2 : ViewModel() {
         } else {
             checkAndWarnDuplicates(
                 context,
-                LibraryListType.FAVORITES,
                 CheckDuplicateData(
                     name = response.name,
                     year = response.year,
@@ -1005,7 +890,6 @@ class ResultViewModel2 : ViewModel() {
     @MainThread
     private fun checkAndWarnDuplicates(
         context: Context?,
-        listType: LibraryListType,
         checkDuplicateData: CheckDuplicateData,
         data: List<DataStoreHelper.LibrarySearchResponse>,
         checkDuplicatesCallback: (shouldContinue: Boolean, duplicateIds: List<Int?>) -> Unit
@@ -1055,28 +939,13 @@ class ResultViewModel2 : ViewModel() {
         } else R.string.duplicate_replace
 
         val message = if (duplicateEntries.size == 1) {
-            val list = when (listType) {
-                LibraryListType.BOOKMARKS -> getResultWatchState(
-                    duplicateEntries[0].id ?: 0
-                ).stringRes
-
-                LibraryListType.FAVORITES -> R.string.favorites_list_name
-                LibraryListType.SUBSCRIPTIONS -> R.string.subscription_list_name
-            }
-
             context.getString(
                 R.string.duplicate_message_single,
-                "${normalizeString(duplicateEntries[0].name)} (${context.getString(list)}) — ${duplicateEntries[0].apiName}"
+                "${normalizeString(duplicateEntries[0].name)} (${context.getString(R.string.favorites_list_name)}) — ${duplicateEntries[0].apiName}"
             )
         } else {
             val bulletPoints = duplicateEntries.joinToString("\n") {
-                val list = when (listType) {
-                    LibraryListType.BOOKMARKS -> getResultWatchState(it.id ?: 0).stringRes
-                    LibraryListType.FAVORITES -> R.string.favorites_list_name
-                    LibraryListType.SUBSCRIPTIONS -> R.string.subscription_list_name
-                }
-
-                "• ${it.apiName}: ${normalizeString(it.name)} (${context.getString(list)})"
+                "• ${it.apiName}: ${normalizeString(it.name)} (${context.getString(R.string.favorites_list_name)})"
             }
 
             context.getString(R.string.duplicate_message_multiple, bulletPoints)
@@ -1381,9 +1250,23 @@ class ResultViewModel2 : ViewModel() {
                 if (activity?.let { DownloadButtonSetup.isDownloadComplete(it, click.data.id) } == true) {
                     options.add(txt(R.string.episode_action_play_from_source) to ACTION_PLAY_EPISODE_FROM_SOURCE)
                 }
-                options.add(
-                    txt(R.string.episode_action_add_to_continue_watching) to ACTION_ADD_TO_CONTINUE_WATCHING
-                )
+                if (DataStoreHelper.isWatchHistoryEnabled() && hasPlayableContent()) {
+                    val sourcePlugin = click.data.sourcePlugin ?: currentSourcePlugin
+                    val isInContinueWatching =
+                        DataStoreHelper.getLastWatched(
+                            click.data.parentId,
+                            sourcePlugin
+                        )?.episodeId == click.data.id
+                    options.add(
+                        txt(
+                            if (isInContinueWatching) {
+                                R.string.remove_from_continue_watching
+                            } else {
+                                R.string.episode_action_add_to_continue_watching
+                            }
+                        ) to ACTION_ADD_TO_CONTINUE_WATCHING
+                    )
+                }
                 options.add(
                     txt(R.string.episode_action_play_incognito) to ACTION_PLAY_EPISODE_IN_PLAYER_INCOGNITO
                 )
@@ -1578,7 +1461,18 @@ class ResultViewModel2 : ViewModel() {
             }
 
             ACTION_ADD_TO_CONTINUE_WATCHING -> {
+                if (!DataStoreHelper.isWatchHistoryEnabled()) {
+                    showToast(R.string.watch_history_disabled, Toast.LENGTH_SHORT)
+                    return
+                }
                 val sourcePlugin = click.data.sourcePlugin ?: currentSourcePlugin
+                val lastWatched = DataStoreHelper.getLastWatched(click.data.parentId, sourcePlugin)
+                if (lastWatched?.episodeId == click.data.id) {
+                    DataStoreHelper.removeLastWatched(click.data.parentId, sourcePlugin)
+                    MainActivity.reloadStoredEvent(true)
+                    showToast(R.string.removed_from_continue_watching, Toast.LENGTH_SHORT)
+                    return
+                }
                 // Opening a card through the small popup does not cache its header, so
                 // make sure Continue Watching has everything it needs to show the card.
                 currentResponse?.let { response ->
@@ -1616,7 +1510,6 @@ class ResultViewModel2 : ViewModel() {
                 val playFromSource = click.action == ACTION_PLAY_EPISODE_FROM_SOURCE
                 val isCustomMedia = currentResponse?.type == TvType.CustomMedia
 
-                val list = HashMap<String, String>(currentResponse?.syncData ?: emptyMap())
                 val generator = generator ?: return
 
                 // I know kinda shit to iterate all, but it is 100% sure to work
@@ -1644,7 +1537,7 @@ class ResultViewModel2 : ViewModel() {
                     activity?.navigate(
                         R.id.global_to_navigation_player,
                         GeneratorPlayer.newInstance(
-                            playerGenerator, index, list, incognito = isIncognito
+                            playerGenerator, index, incognito = isIncognito
                         )
                     )
                 }
@@ -2041,19 +1934,6 @@ class ResultViewModel2 : ViewModel() {
         postResume()
     }
 
-    private fun postSubscription(loadResponse: LoadResponse) {
-        val id = loadResponse.getId()
-        val data = getSubscribedData(id)
-        if (loadResponse.isEpisodeBased()) {
-            updateSubscribedData(id, data, loadResponse as? EpisodeResponse)
-            _subscribeStatus.postValue(data != null)
-        }
-        // lets say that we have subscribed, then we must be able to unsubscribe no matter what
-        else if (data != null) {
-            _subscribeStatus.postValue(true)
-        } else _subscribeStatus.postValue(null)
-    }
-
     private fun postFavorites(loadResponse: LoadResponse) {
         val id = loadResponse.getId()
         val isFavorite = getFavoritesData(id) != null
@@ -2243,9 +2123,7 @@ class ResultViewModel2 : ViewModel() {
         currentId = mainId
         currentResponse = loadResponse
         postPage(loadResponse, apiRepository)
-        postSubscription(loadResponse)
         postFavorites(loadResponse)
-        _watchStatus.postValue(getResultWatchState(mainId))
 
         if (updateEpisodes)
             postEpisodes(loadResponse, mainId, updateFillers)
@@ -2689,8 +2567,13 @@ class ResultViewModel2 : ViewModel() {
                 ?: APIHolder.getApiFromUrlNull(searchResponse.url)
                 ?: APIRepository.noneApi
         // Same as load(): when the card itself does not know its plugin, scope the play to
-        // the provider that actually served it rather than to the shared bucket.
-        currentSourcePlugin = sourcePlugin ?: api.sourcePlugin
+        // the provider that actually served it rather than to the shared bucket. Legacy
+        // Continue Watching cards must keep their null scope so their entry is still found.
+        currentSourcePlugin = if (searchResponse is DataStoreHelper.ResumeWatchingResult) {
+            sourcePlugin
+        } else {
+            sourcePlugin ?: api.sourcePlugin
+        }
         val repo = APIRepository(api)
         val response = LoadResponseFromSearch(
             name = searchResponse.name,
@@ -2698,16 +2581,12 @@ class ResultViewModel2 : ViewModel() {
             apiName = api.name,
             type = searchResponse.type ?: TvType.Others,
             posterUrl = searchResponse.posterUrl,
-            id = searchResponse.id
+            id = (searchResponse as? DataStoreHelper.ResumeWatchingResult)?.parentId
+                ?: searchResponse.id
         ).apply {
             if (searchResponse is SyncAPI.LibraryItem) {
                 this.plot = searchResponse.plot
                 this.score = searchResponse.personalRating ?: searchResponse.score
-                this.tags = searchResponse.tags
-            }
-            if (searchResponse is DataStoreHelper.BookmarkedData) {
-                this.plot = searchResponse.plot
-                this.score = searchResponse.score
                 this.tags = searchResponse.tags
             }
         }
